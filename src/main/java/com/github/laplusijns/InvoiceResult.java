@@ -1,0 +1,29 @@
+package com.github.laplusijns;
+
+import com.fasterxml.jackson.annotation.JsonValue;
+import java.io.Serializable;
+
+public enum InvoiceResult implements Serializable {
+    SPECIAL_PRIZE("特別獎"),
+    GRAND_PRIZE("特獎"),
+    FIRST_PRIZE("頭獎"),
+    SECOND_PRIZE("二獎"),
+    THIRD_PRIZE("三獎"),
+    FOURTH_PRIZE("四獎"),
+    FIFTH_PRIZE("五獎"),
+    SIXTH_PRIZE("六獎"),
+    ERROR_NOT_FOUND("未找到期別、過期"),
+    ERROR_EIGHT_NUMBER("號碼不對"),
+    NO_PRIZE("未中獎");
+
+    private final String value;
+
+    InvoiceResult(final String value) {
+        this.value = value;
+    }
+
+    @JsonValue
+    public String getValue() {
+        return value;
+    }
+}
