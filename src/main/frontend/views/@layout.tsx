@@ -61,19 +61,18 @@ export default function MainLayout() {
   const toggleDarkMode = () => {
     darkModeSignal.value = !darkModeSignal.value;
   };
-  
 
   return (
     <AppLayout primarySection="drawer">
       {isMobile ? (
         <HorizontalLayout slot="navbar touch-optimized" className="flex-row" style={{ width: '100%' }}>
           {createMenuItems().map(({ to, title, icon }) => (
-			<SideNav onNavigate={({ path }) => navigate(path!)} location={location}>
-	            <SideNavItem path={to} key={to}>
-	              {icon ? <Icon src={icon} slot="prefix"></Icon> : <></>}
-	              {title}
-	            </SideNavItem>
-			</SideNav>
+            <SideNav onNavigate={({ path }) => navigate(path!)} location={location}>
+              <SideNavItem path={to} key={to}>
+                {icon ? <Icon src={icon} slot="prefix"></Icon> : <></>}
+                {title}
+              </SideNavItem>
+            </SideNav>
           ))}
           <Button theme="contrast" onClick={toggleDarkMode}>
             <Icon src={darkModeSignal.value ? 'line-awesome/svg/sun-solid.svg' : 'line-awesome/svg/moon-solid.svg'} />

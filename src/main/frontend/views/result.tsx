@@ -1,5 +1,17 @@
 import { ViewConfig } from '@vaadin/hilla-file-router/types.js';
-import { Grid, GridColumn, Dialog, Button, Notification } from '@vaadin/react-components';
+import {
+  Grid,
+  GridColumn,
+  Dialog,
+  Button,
+  Notification,
+  TextField,
+  Select,
+  FormLayout,
+  FormRow,
+  TextFieldElement,
+} from '@vaadin/react-components';
+import { useSignal } from '@vaadin/hilla-react-signals';
 import { useState, useEffect, useRef } from 'react';
 import { ProcessService } from 'Frontend/generated/endpoints';
 import InvoiceDTO from 'Frontend/generated/com/github/laplusijns/InvoiceDTO';
@@ -13,8 +25,21 @@ export default function ResultView() {
   const [selectedPreview, setSelectedPreview] = useState<string | null>(null);
   const jsessionidRef = useRef<any>(null);
   const subscriptionRef = useRef<any>(null);
+  const invoicePeriods = useRef<any>(null);
+  const [invoiceNumber, setInvoiceNumber] = useState('');
+  const [period, setPeriod] = useState('');
+  const errorMessage = useSignal('');
 
   useEffect(() => {
+    ProcessService.invoicePeriods().then((periods: string[]) => {
+      const formatted = periods.map((item) => ({
+        label: item,
+        value: item,
+      }));
+      setPeriod(formatted[0].value);
+      invoicePeriods.current = formatted;
+    });
+
     ProcessService.jsessionId().then((jsessionid: string) => {
       jsessionidRef.current = jsessionid;
 
@@ -36,6 +61,36 @@ export default function ResultView() {
     };
   }, []);
 
+  async function onSubmit() {
+    const trimmedInvoiceNumber = invoiceNumber.trim();
+    const trimmedPeriod = period.trim();
+    const invoiceRegex = /^\d{8}$/;
+    if (!invoiceRegex.test(trimmedInvoiceNumber)) {
+      Notification.show('發票號碼必須為8位數字', {
+        theme: 'error',
+        position: 'top-center',
+      });
+      return;
+    }
+
+    if (!trimmedInvoiceNumber || !trimmedPeriod) {
+      Notification.show('請填寫發票號碼並選擇期別', {
+        theme: 'error',
+        position: 'top-center',
+      });
+      return;
+    }
+    ProcessService.process2(trimmedPeriod, trimmedInvoiceNumber, jsessionidRef.current)
+      .then(() => {
+        Notification.show('提交成功', { theme: 'success', position: 'top-center' });
+        setInvoiceNumber('');
+      })
+      .catch((e) => {
+        console.error(e);
+        Notification.show('提交失敗', { theme: 'error', position: 'top-center' });
+      });
+  }
+
   function ColRenderer({ item }: Readonly<{ item: InvoiceDTO }>) {
     return (
       <img
@@ -46,6 +101,7 @@ export default function ResultView() {
       />
     );
   }
+
   function DeleteRenderer({ item }: Readonly<{ item: InvoiceDTO }>) {
     return (
       <div className="p-0 m-0">
@@ -74,6 +130,38 @@ export default function ResultView() {
 
   return (
     <div className="flex flex-col h-full items-center justify-center text-center box-border w-full">
+      <FormLayout autoResponsive>
+        <FormRow>
+          <TextField
+            label="發票號碼(純數字)"
+            value={invoiceNumber}
+            maxlength={8}
+            minlength={8}
+            allowedCharPattern="\d"
+            pattern="^\d{8}$"
+            onValueChanged={(e) => setInvoiceNumber(e.detail.value)}
+            onValidated={(event) => {
+              const field = event.target as TextFieldElement;
+              const { validity } = field.inputElement as HTMLInputElement;
+              if (validity.valueMissing) {
+                errorMessage.value = '必填欄位';
+              } else if (validity.tooShort) {
+                errorMessage.value = `發票固定8碼`;
+              } else if (validity.tooLong) {
+                errorMessage.value = `發票固定8碼`;
+              } else if (validity.patternMismatch) {
+                errorMessage.value = '固定8碼、只能數字';
+              } else {
+                errorMessage.value = '';
+              }
+            }}
+            errorMessage={errorMessage.value}></TextField>
+          <Select label="期別" items={invoicePeriods.current} value={period} required />
+          <Button theme="primary" onClick={onSubmit}>
+            提交
+          </Button>
+        </FormRow>
+      </FormLayout>
       <h2 className="mb-m">發票結果列表</h2>
       <Grid items={invoices} className="w-full" theme="row-stripes wrap-cell-content compact">
         <GridColumn header="操作" renderer={DeleteRenderer} autoWidth flexGrow={0} />

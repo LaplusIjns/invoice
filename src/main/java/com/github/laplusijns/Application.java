@@ -25,9 +25,9 @@ public class Application extends SpringBootServletInitializer implements AppShel
     public static void main(final String[] args) {
         SpringApplication.run(Application.class, args);
     }
-    
+
     @Override
-	protected SpringApplicationBuilder configure(SpringApplicationBuilder application) {
-		return application.sources(Application.class);
-	}
+    protected SpringApplicationBuilder configure(final SpringApplicationBuilder application) {
+        return application.sources(Application.class);
+    }
 }
