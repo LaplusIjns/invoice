@@ -1,5 +1,11 @@
 package com.github.laplusijns;
 
+import com.vaadin.flow.server.VaadinService;
+import com.vaadin.flow.server.VaadinServletRequest;
+import com.vaadin.flow.server.auth.AnonymousAllowed;
+import com.vaadin.hilla.Endpoint;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpSession;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
@@ -12,6 +18,7 @@ import java.util.Base64;
 import java.util.Collections;
 import java.util.Date;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
@@ -19,9 +26,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-
 import javax.imageio.ImageIO;
-
 import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,14 +40,6 @@ import org.springframework.core.retry.RetryPolicy;
 import org.springframework.core.retry.RetryTemplate;
 import org.springframework.util.MimeType;
 import org.springframework.util.MimeTypeUtils;
-
-import com.vaadin.flow.server.VaadinService;
-import com.vaadin.flow.server.VaadinServletRequest;
-import com.vaadin.flow.server.auth.AnonymousAllowed;
-import com.vaadin.hilla.Endpoint;
-
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpSession;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Sinks.EmitResult;
 
@@ -143,14 +140,46 @@ public class ProcessService {
         return List.of();
     }
 
+    public @NonNull Set<@NonNull String> invoicePeriods() {
+        return invoiceService.invoicePeriods();
+    }
+
+    public void process2(
+            @NonNull final String periodKey, @NonNull final String invoiceNum, @NonNull final String jsessionId) {
+        final var userData = userCache.get(jsessionId);
+        if (userData == null) {
+            log.info("沒有使用者");
+            invoiceChannels.createChannel(jsessionId);
+            userCache.put(jsessionId, new UserData());
+        }
+        final List<InvoiceDTO> data =
+                userData == null ? userCache.get(jsessionId).getData() : userData.getData();
+        log.info("task start {}", new Date());
+        final Invoice invoice = new Invoice(periodKey, invoiceNum);
+
+        final InvoiceResult result = invoiceService.checkInvoice(
+                invoice.invoiceDate, invoice.invoiceNumber.split("-")[1]);
+        final String uuid = UUID.randomUUID().toString();
+        final String key = UUID.randomUUID().toString();
+
+        final InvoiceDTO invoiceDTO = new InvoiceDTO(key, invoice.invoiceNumber, invoice.invoiceDate, result, uuid);
+        data.add(invoiceDTO);
+        log.info("{}", jsessionId);
+        final EmitResult emitResult = invoiceChannels.tryEmitNext(jsessionId, invoiceDTO);
+        log.info("emitResult {}", emitResult);
+    }
+
     public void process(@NonNull final String base64Image, @NonNull final String jsessionId) {
 
         final var userData = userCache.get(jsessionId);
         if (userData == null) {
-            return;
+            log.info("沒有使用者");
+            invoiceChannels.createChannel(jsessionId);
+            userCache.put(jsessionId, new UserData());
         }
 
-        final List<InvoiceDTO> data = userData.getData();
+        final List<InvoiceDTO> data =
+                userData == null ? userCache.get(jsessionId).getData() : userData.getData();
 
         log.info("task start {}", new Date());
         // 把 OCR 任務加入隊列，不直接執行
@@ -253,7 +282,8 @@ public class ProcessService {
             this.invoiceDate = NA;
         }
     }
-    private static byte[] resizePng(byte[] pngBytes, int maxSize) throws IOException {
+
+    private static byte[] resizePng(final byte[] pngBytes, final int maxSize) throws IOException {
         BufferedImage original;
         try (ByteArrayInputStream bis = new ByteArrayInputStream(pngBytes)) {
             original = ImageIO.read(bis);
@@ -263,37 +293,27 @@ public class ProcessService {
             throw new IllegalArgumentException("Invalid image data");
         }
 
-        int width = original.getWidth();
-        int height = original.getHeight();
+        final int width = original.getWidth();
+        final int height = original.getHeight();
 
         // 2. 計算等比例縮放
-        float scale = Math.min(
-                (float) maxSize / width,
-                (float) maxSize / height
-        );
+        final float scale = Math.min((float) maxSize / width, (float) maxSize / height);
 
         // 如果本來就 <= 300，可以直接回傳
         if (scale >= 1.0f) {
             return pngBytes;
         }
 
-        int newWidth = Math.round(width * scale);
-        int newHeight = Math.round(height * scale);
+        final int newWidth = Math.round(width * scale);
+        final int newHeight = Math.round(height * scale);
 
         // 3. 建立縮圖（保留透明背景）
-        BufferedImage resized = new BufferedImage(
-                newWidth,
-                newHeight,
-                BufferedImage.TYPE_INT_ARGB
-        );
+        final BufferedImage resized = new BufferedImage(newWidth, newHeight, BufferedImage.TYPE_INT_ARGB);
 
-        Graphics2D g2d = resized.createGraphics();
-        g2d.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
-                RenderingHints.VALUE_INTERPOLATION_BICUBIC);
-        g2d.setRenderingHint(RenderingHints.KEY_RENDERING,
-                RenderingHints.VALUE_RENDER_QUALITY);
-        g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
-                RenderingHints.VALUE_ANTIALIAS_ON);
+        final Graphics2D g2d = resized.createGraphics();
+        g2d.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+        g2d.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+        g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 
         g2d.drawImage(original, 0, 0, newWidth, newHeight, null);
         g2d.dispose();
