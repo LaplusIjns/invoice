@@ -17,7 +17,7 @@ import { ProcessService } from 'Frontend/generated/endpoints';
 import InvoiceDTO from 'Frontend/generated/com/github/laplusijns/InvoiceDTO';
 export const config: ViewConfig = {
   menu: { order: 1, icon: 'line-awesome/svg/money-bill-solid.svg' },
-  title: '結果',
+  title: '測試-結果',
 };
 
 export default function ResultView() {
