@@ -6,7 +6,7 @@ import { useBlocker, BlockerFunction } from 'react-router';
 
 export const config: ViewConfig = {
   menu: { order: 0, icon: 'line-awesome/svg/camera-solid.svg' },
-  title: 'camera',
+  title: '相機',
 };
 
 // 封裝導航前阻止 hook
