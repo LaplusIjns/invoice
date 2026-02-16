@@ -155,7 +155,7 @@ public class ProcessService {
         final List<InvoiceDTO> data =
                 userData == null ? userCache.get(jsessionId).getData() : userData.getData();
         log.info("task start {}", new Date());
-        final Invoice invoice = new Invoice(periodKey, invoiceNum);
+        final Invoice invoice = new Invoice(invoiceNum, periodKey);
 
         final InvoiceResult result = invoiceService.checkInvoice(
                 invoice.invoiceDate, invoice.invoiceNumber.split("-")[1]);
