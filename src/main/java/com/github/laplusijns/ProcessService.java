@@ -157,8 +157,7 @@ public class ProcessService {
         log.info("task start {}", new Date());
         final Invoice invoice = new Invoice(invoiceNum, periodKey);
 
-        final InvoiceResult result = invoiceService.checkInvoice(
-                invoice.invoiceDate, invoice.invoiceNumber);
+        final InvoiceResult result = invoiceService.checkInvoice(invoice.invoiceDate, invoice.invoiceNumber);
         final String uuid = UUID.randomUUID().toString();
         final String key = UUID.randomUUID().toString();
 
@@ -200,9 +199,13 @@ public class ProcessService {
                 if (invoice == null) {
                     invoice = new Invoice(NA, NA);
                 }
-
-                final InvoiceResult result = invoiceService.checkInvoice(
-                        invoice.invoiceDate, invoice.invoiceNumber.split("-")[1]);
+                InvoiceResult result;
+                if (NA.equals(invoice.invoiceDate) || NA.equals(invoice.invoiceNumber)) {
+                    result = InvoiceResult.ERROR_NOT_FOUND;
+                } else {
+                    result = invoiceService.checkInvoice(
+                            invoice.invoiceDate, invoice.invoiceNumber.split("-")[1]);
+                }
                 final String uuid = UUID.randomUUID().toString();
                 imageCache.put(uuid, imageBytes);
                 imageCache.putThumbnail(uuid, resizeBytes);
