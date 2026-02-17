@@ -158,7 +158,7 @@ public class ProcessService {
         final Invoice invoice = new Invoice(invoiceNum, periodKey);
 
         final InvoiceResult result = invoiceService.checkInvoice(
-                invoice.invoiceDate, invoice.invoiceNumber.split("-")[1]);
+                invoice.invoiceDate, invoice.invoiceNumber);
         final String uuid = UUID.randomUUID().toString();
         final String key = UUID.randomUUID().toString();
 

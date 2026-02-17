@@ -156,7 +156,7 @@ export default function ResultView() {
               }
             }}
             errorMessage={errorMessage.value}></TextField>
-          <Select label="期別" items={invoicePeriods.current} value={period} required />
+          <Select label="期別" items={invoicePeriods.current} value={period} required onValueChanged={(e) => setPeriod(e.detail.value)} />
           <Button theme="primary" onClick={onSubmit}>
             提交
           </Button>
