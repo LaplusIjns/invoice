@@ -17,7 +17,6 @@ import org.springframework.boot.web.servlet.support.SpringBootServletInitializer
  *
  */
 @SpringBootApplication
-@Theme("invoice")
 @StyleSheet(Lumo.STYLESHEET)
 @StyleSheet(Lumo.UTILITY_STYLESHEET)
 public class Application extends SpringBootServletInitializer implements AppShellConfigurator {
