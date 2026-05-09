@@ -30,6 +30,10 @@ public class InvoiceService {
                 "115年01-02月",
                 new InvoicePeriod(
                         "115年01-02月", "87510041", "32220522", Arrays.asList("21677046", "44662410", "31262513")));
+        PERIOD_MAP.put(
+                "115年03-04月",
+                new InvoicePeriod(
+                        "115年03-04月", "44140251", "14715309", Arrays.asList("86562747", "79171152", "77925523")));
     }
 
     public Set<String> invoicePeriods() {
