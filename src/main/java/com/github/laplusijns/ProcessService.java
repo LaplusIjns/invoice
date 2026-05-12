@@ -183,11 +183,21 @@ public class ProcessService {
         log.info("task start {}", new Date());
         // 把 OCR 任務加入隊列，不直接執行
         final boolean bool = taskQueue.offer(() -> {
+        	final String[] parts = base64Image.split(";base64,");
+        	final String uuid = UUID.randomUUID().toString();
+        	final byte[] imageBytes = Base64.getDecoder().decode(parts[1]);
+        	byte[] resizeBytes = new byte[] {};
+        	try {
+				resizeBytes = resizePng(imageBytes, 300);
+			} catch (IOException e) {
+				log.error("resizePng exception",e);
+			}
+            imageCache.put(uuid, imageBytes);
+            imageCache.putThumbnail(uuid, resizeBytes);
+            final String key = UUID.randomUUID().toString();
+            
             try {
-                final String[] parts = base64Image.split(";base64,");
                 final String mimeTypeString = parts[0].replace("data:", "");
-                final byte[] imageBytes = Base64.getDecoder().decode(parts[1]);
-                final byte[] resizeBytes = resizePng(imageBytes, 300);
                 final Resource resource = new ByteArrayResource(imageBytes);
                 final MimeType mimeType = MimeTypeUtils.parseMimeType(mimeTypeString);
 
@@ -206,10 +216,6 @@ public class ProcessService {
                     result = invoiceService.checkInvoice(
                             invoice.invoiceDate, invoice.invoiceNumber.split("-")[1]);
                 }
-                final String uuid = UUID.randomUUID().toString();
-                imageCache.put(uuid, imageBytes);
-                imageCache.putThumbnail(uuid, resizeBytes);
-                final String key = UUID.randomUUID().toString();
 
                 final InvoiceDTO invoiceDTO =
                         new InvoiceDTO(key, invoice.invoiceNumber, invoice.invoiceDate, result, uuid);
@@ -219,7 +225,10 @@ public class ProcessService {
                 log.info("emitResult {}", emitResult);
 
             } catch (Exception e) {
-                e.printStackTrace();
+            	log.error("taskQueue error",e);
+            	final InvoiceDTO invoiceDTO = new InvoiceDTO(key, e.getClass().toString(), "", InvoiceResult.ERROR_NOT_FOUND, uuid);
+            	final EmitResult emitResult = invoiceChannels.tryEmitNext(jsessionId, invoiceDTO);
+                log.info("exception emitResult {}", emitResult);
             }
         });
 
