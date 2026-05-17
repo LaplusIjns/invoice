@@ -58,14 +58,14 @@ public class ProcessService {
     private static final String AI_PROMPT = """
 			你是一個專業的 OCR 與台灣發票分析 AI。
 			任務：分析我提供的台灣發票圖片，準確抽取以下資訊：
-			發票號碼（Invoice Number）
+			發票號碼（invoiceNumber）
 			格式：兩個英文大寫字母 + 減號 + 八位數字，例如 "AB-11223344"
-			發票日期（Invoice Date）
+			發票日期（invoiceDate）
 			格式：台灣民國年 + 月份區間，例如 "104年05-06月"
 			請以 JSON 格式回傳結果，結構如下：
 			{
-			  "invoice_number": "抽取到的發票號碼",
-			  "invoice_date": "抽取到的發票日期"
+			  "invoiceNumber": "抽取到的發票號碼",
+			  "invoiceDate": "抽取到的發票日期"
 			}
 			注意事項：
 			只輸出 JSON，不要額外文字。
