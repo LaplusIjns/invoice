@@ -1,7 +1,7 @@
 package com.github.laplusijns;
 
-import jakarta.servlet.http.HttpSessionListener;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.client.advisor.SimpleLoggerAdvisor;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.openai.OpenAiChatOptions;
@@ -13,6 +13,8 @@ import org.springframework.boot.web.servlet.ServletListenerRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.resilience.annotation.EnableResilientMethods;
+
+import jakarta.servlet.http.HttpSessionListener;
 
 @Configuration
 @EnableResilientMethods
@@ -53,7 +55,7 @@ public class InvoiceConfg {
 
     @Bean
     ChatClient chatClient(final ChatModel chatModel) {
-        return ChatClient.builder(chatModel).build();
+        return ChatClient.builder(chatModel).defaultAdvisors(new SimpleLoggerAdvisor()).build();
     }
 
     @Bean
