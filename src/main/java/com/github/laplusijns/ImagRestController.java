@@ -30,8 +30,8 @@ public class ImagRestController {
     }
 
     @GetMapping("/thumbnail/{uuid}")
-    public ResponseEntity<byte[]> downloadFile2(@PathVariable final String uuid) {
-        final byte[] file = imageCache.get(uuid);
+    public ResponseEntity<byte[]> downloadThumbnailFile(@PathVariable final String uuid) {
+        final byte[] file = imageCache.getThumbnail(uuid);
         if (file == null) {
             return ResponseEntity.notFound().build();
         }

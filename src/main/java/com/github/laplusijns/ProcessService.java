@@ -61,7 +61,7 @@ public class ProcessService {
 			發票號碼（invoiceNumber）
 			格式：兩個英文大寫字母 + 減號 + 八位數字，例如 "AB-11223344"
 			發票日期（invoiceDate）
-			格式：台灣民國年 + 月份區間，例如 "104年05-06月"
+			格式：台灣民國年 + 月份區間，例如 "114年05-06月"
 			請以 JSON 格式回傳結果，結構如下：
 			{
 			  "invoiceNumber": "抽取到的發票號碼",
@@ -146,14 +146,14 @@ public class ProcessService {
 
     public void process2(
             @NonNull final String periodKey, @NonNull final String invoiceNum, @NonNull final String jsessionId) {
-        final var userData = userCache.get(jsessionId);
+        var userData = userCache.get(jsessionId);
         if (userData == null) {
             log.info("沒有使用者");
             invoiceChannels.createChannel(jsessionId);
-            userCache.put(jsessionId, new UserData());
+            userData = new UserData();
+            userCache.put(jsessionId, userData);
         }
-        final List<InvoiceDTO> data =
-                userData == null ? userCache.get(jsessionId).getData() : userData.getData();
+        final List<InvoiceDTO> data = userData.getData();
         log.info("task start {}", new Date());
         final Invoice invoice = new Invoice(invoiceNum, periodKey);
 
@@ -170,32 +170,30 @@ public class ProcessService {
 
     public void process(@NonNull final String base64Image, @NonNull final String jsessionId) {
 
-        final var userData = userCache.get(jsessionId);
+        var userData = userCache.get(jsessionId);
         if (userData == null) {
             log.info("沒有使用者");
             invoiceChannels.createChannel(jsessionId);
-            userCache.put(jsessionId, new UserData());
+            userData = new UserData();
+            userCache.put(jsessionId, userData);
         }
-
-        final List<InvoiceDTO> data =
-                userData == null ? userCache.get(jsessionId).getData() : userData.getData();
-
+        final List<InvoiceDTO> data = userData.getData();
         log.info("task start {}", new Date());
         // 把 OCR 任務加入隊列，不直接執行
         final boolean bool = taskQueue.offer(() -> {
-        	final String[] parts = base64Image.split(";base64,");
-        	final String uuid = UUID.randomUUID().toString();
-        	final byte[] imageBytes = Base64.getDecoder().decode(parts[1]);
-        	byte[] resizeBytes = new byte[] {};
-        	try {
-				resizeBytes = resizePng(imageBytes, 300);
-			} catch (IOException e) {
-				log.error("resizePng exception",e);
-			}
+            final String[] parts = base64Image.split(";base64,");
+            final String uuid = UUID.randomUUID().toString();
+            final byte[] imageBytes = Base64.getDecoder().decode(parts[1]);
+            byte[] resizeBytes = new byte[] {};
+            try {
+                resizeBytes = resizePng(imageBytes, 300);
+            } catch (IOException e) {
+                log.error("resizePng exception", e);
+            }
             imageCache.put(uuid, imageBytes);
             imageCache.putThumbnail(uuid, resizeBytes);
             final String key = UUID.randomUUID().toString();
-            
+
             try {
                 final String mimeTypeString = parts[0].replace("data:", "");
                 final Resource resource = new ByteArrayResource(imageBytes);
@@ -225,9 +223,10 @@ public class ProcessService {
                 log.info("emitResult {}", emitResult);
 
             } catch (Exception e) {
-            	log.error("taskQueue error",e);
-            	final InvoiceDTO invoiceDTO = new InvoiceDTO(key, e.getClass().toString(), "", InvoiceResult.ERROR_NOT_FOUND, uuid);
-            	final EmitResult emitResult = invoiceChannels.tryEmitNext(jsessionId, invoiceDTO);
+                log.error("taskQueue error", e);
+                final InvoiceDTO invoiceDTO =
+                        new InvoiceDTO(key, e.getClass().toString(), "", InvoiceResult.ERROR_NOT_FOUND, uuid);
+                final EmitResult emitResult = invoiceChannels.tryEmitNext(jsessionId, invoiceDTO);
                 log.info("exception emitResult {}", emitResult);
             }
         });
@@ -278,8 +277,19 @@ public class ProcessService {
             this.invoiceDate = invoiceDate.replaceAll("\\s+", "");
             final Pattern pattern = Pattern.compile("\\d{3}年\\d{2}-\\d{2}月");
             final Matcher matcher = pattern.matcher(this.invoiceDate);
+
+            final Pattern pattern2 = Pattern.compile("(\\d+)年(\\d{1,2})-(\\d{1,2})月");
+            final Matcher matcher2 = pattern2.matcher(this.invoiceDate);
             if (matcher.find()) {
                 this.invoiceDate = matcher.group();
+            }
+            if (matcher2.find()) {
+                final String newStr = "%s年%02d-%02d月"
+                        .formatted(
+                                matcher.group(1),
+                                Integer.parseInt(matcher.group(2)),
+                                Integer.parseInt(matcher.group(3)));
+                this.invoiceDate = newStr;
             }
         }
 

@@ -30,7 +30,7 @@ export default function CameraView() {
   const jsessionidRef = useRef<any>(null);
 
   const [flash, setFlash] = useState(false);
-  const flashTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const flashTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [previewQueue, setPreviewQueue] = useState<PhotoTask[]>([]);
 
   type PhotoTask = {
