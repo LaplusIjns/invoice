@@ -16,7 +16,7 @@ import { Outlet, useLocation, useNavigate } from 'react-router';
 if ("registerProperty" in CSS) {
   const original = CSS.registerProperty.bind(CSS);
 
-  CSS.registerProperty = ((definition: CSSPropertyDefinition) => {
+  CSS.registerProperty = ((definition: any) => {
     try {
       original(definition);
     } catch (e) {
@@ -24,7 +24,7 @@ if ("registerProperty" in CSS) {
         e instanceof DOMException &&
         e.name === "InvalidModificationError"
       ) {
-        // 已註冊，忽略
+        // 已經註冊過，忽略
         return;
       }
       throw e;
