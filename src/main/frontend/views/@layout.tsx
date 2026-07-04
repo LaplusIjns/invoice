@@ -13,25 +13,6 @@ import {
 import { Suspense, useEffect, useState, useRef } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router';
 
-if ("registerProperty" in CSS) {
-  const original = CSS.registerProperty.bind(CSS);
-
-  CSS.registerProperty = ((definition: any) => {
-    try {
-      original(definition);
-    } catch (e) {
-      if (
-        e instanceof DOMException &&
-        e.name === "InvalidModificationError"
-      ) {
-        // 已經註冊過，忽略
-        return;
-      }
-      throw e;
-    }
-  }) as typeof CSS.registerProperty;
-}
-
 const documentTitleSignal = signal('');
 const savedTheme = localStorage.getItem('darkMode');
 const darkModeSignal = signal(savedTheme === 'true');
