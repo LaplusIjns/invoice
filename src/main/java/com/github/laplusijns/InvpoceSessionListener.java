@@ -2,11 +2,9 @@ package com.github.laplusijns;
 
 import jakarta.servlet.http.HttpSessionEvent;
 import jakarta.servlet.http.HttpSessionListener;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
-
 
 @Component
 public class InvpoceSessionListener implements HttpSessionListener {
@@ -14,7 +12,7 @@ public class InvpoceSessionListener implements HttpSessionListener {
     ImageCache imageCache;
     InvoiceChannels invoiceChannels;
     UserCache userCache;
-    
+
     private static Logger log = LoggerFactory.getLogger(InvpoceSessionListener.class);
 
     public InvpoceSessionListener(
@@ -48,7 +46,7 @@ public class InvpoceSessionListener implements HttpSessionListener {
         }
         userCache.delete(id);
         invoiceChannels.cleanUp(se.getSession().getId());
-        
+
         log.info("session 斷開 {}", id);
     }
 }
