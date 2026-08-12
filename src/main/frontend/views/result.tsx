@@ -68,7 +68,12 @@ const InvoiceForm = memo(function InvoiceForm({
   }, [invoiceNumber, period, onSubmit]);
 
   return (
-    <FormLayout autoResponsive>
+    <FormLayout
+      maxColumns={3}
+      style={{
+        alignSelf: 'center',
+      }}
+      autoResponsive>
       <FormRow>
         <TextField
           label="發票號碼(純數字)"
