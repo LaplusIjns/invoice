@@ -40,3 +40,12 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### tmp remove auto generated code ###
+package.json
+package-lock.json
+*.generated.*
+package-lock.json
+package.json
+tsconfig.json
+types.d.ts
