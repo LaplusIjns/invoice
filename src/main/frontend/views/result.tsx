@@ -187,8 +187,13 @@ export default function ResultView() {
 
       subscriptionRef.current = ProcessService.invoiceSubscription(jsessionid).onNext((update: InvoiceDTO) => {
         setInvoices((prevInvoices) => {
-          const exists = prevInvoices.some((t) => t.key === update.key);
-          return exists ? prevInvoices : [...prevInvoices, update];
+          const exists = prevInvoices.some((item) => item.key === update.key);
+
+          if (exists) {
+            return prevInvoices.map((item) => (item.key === update.key ? update : item));
+          }
+
+          return [...prevInvoices, update];
         });
       });
     });

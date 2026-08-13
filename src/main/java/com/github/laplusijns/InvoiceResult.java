@@ -14,7 +14,8 @@ public enum InvoiceResult implements Serializable {
     SIXTH_PRIZE("六獎"),
     ERROR_NOT_FOUND("未找到期別、過期"),
     ERROR_EIGHT_NUMBER("號碼不對"),
-    NO_PRIZE("未中獎");
+    NO_PRIZE("未中獎"),
+    PROGRESS("處理中");
 
     private final String value;
 

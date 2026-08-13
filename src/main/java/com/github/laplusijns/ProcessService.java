@@ -169,7 +169,8 @@ public class ProcessService {
     }
 
     public void process(@NonNull final String base64Image, @NonNull final String jsessionId) {
-
+        final String uuid = UUID.randomUUID().toString();
+        final String key = UUID.randomUUID().toString();
         var userData = userCache.get(jsessionId);
         if (userData == null) {
             log.info("沒有使用者");
@@ -178,11 +179,14 @@ public class ProcessService {
             userCache.put(jsessionId, userData);
         }
         final List<InvoiceDTO> data = userData.getData();
+        final InvoiceDTO initDTO = new InvoiceDTO(key, "", "", InvoiceResult.PROGRESS, uuid);
+        final EmitResult initEmitResult = invoiceChannels.tryEmitNext(jsessionId, initDTO);
+        data.add(initDTO);
+        log.info("exception emitResult {}", initEmitResult);
         log.info("task start {}", new Date());
         // 把 OCR 任務加入隊列，不直接執行
         final boolean bool = taskQueue.offer(() -> {
             final String[] parts = base64Image.split(";base64,");
-            final String uuid = UUID.randomUUID().toString();
             final byte[] imageBytes = Base64.getDecoder().decode(parts[1]);
             byte[] resizeBytes = new byte[] {};
             try {
@@ -192,7 +196,6 @@ public class ProcessService {
             }
             imageCache.put(uuid, imageBytes);
             imageCache.putThumbnail(uuid, resizeBytes);
-            final String key = UUID.randomUUID().toString();
 
             try {
                 final String mimeTypeString = parts[0].replace("data:", "");
@@ -230,7 +233,6 @@ public class ProcessService {
                 log.info("exception emitResult {}", emitResult);
             }
         });
-
         if (!bool) {
             log.error("序列出錯");
         }
