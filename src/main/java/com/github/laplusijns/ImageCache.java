@@ -30,6 +30,7 @@ public class ImageCache {
     public @Nullable byte[] get(final String uuid) {
         return fileCache.getIfPresent(uuid);
     }
+
     public @Nullable byte[] getThumbnail(final String uuid) {
         return thumbNailCache.getIfPresent(uuid);
     }
@@ -39,7 +40,7 @@ public class ImageCache {
         thumbNailCache.invalidate(uuid);
     }
 
-	public void putThumbnail(String uuid, byte[] resizeBytes) {
-		thumbNailCache.put(uuid, resizeBytes);
-	}
+    public void putThumbnail(final String uuid, final byte[] resizeBytes) {
+        thumbNailCache.put(uuid, resizeBytes);
+    }
 }

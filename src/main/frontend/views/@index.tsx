@@ -7,7 +7,7 @@ import { PhotoTaskQueue, type PhotoTask } from 'Frontend/photo-task-queue';
 
 export const config: ViewConfig = {
   menu: { order: 0, icon: 'line-awesome/svg/camera-solid.svg' },
-  title: 'camera',
+  title: '相機',
 };
 
 // 封裝導航前阻止 hook
@@ -42,7 +42,7 @@ export default function CameraView() {
   const jsessionidRef = useRef<string | null>(null);
 
   const [flash, setFlash] = useState(false);
-  const flashTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const flashTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [previewTask, setPreviewTask] = useState<PhotoTask | null>(null);
 
   // 上傳隊列及處理狀態
@@ -181,15 +181,76 @@ export default function CameraView() {
   const takePhoto = () => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
-    if (!video || !canvas) return;
 
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+    if (!video || !canvas) return;
+    if (!video.videoWidth || !video.videoHeight) return;
+
+    // 瀏覽器目前實際顯示的 video 尺寸
+    const rect = video.getBoundingClientRect();
+
+    const displayWidth = rect.width;
+    const displayHeight = rect.height;
+
+    // 攝影機原始尺寸
+    const videoWidth = video.videoWidth;
+    const videoHeight = video.videoHeight;
+
+    const videoRatio = videoWidth / videoHeight;
+    const displayRatio = displayWidth / displayHeight;
+
+    let sourceX = 0;
+    let sourceY = 0;
+    let sourceWidth = videoWidth;
+    let sourceHeight = videoHeight;
+
+    /*
+     * 對應 object-fit: cover
+     *
+     * 原始影片比較寬：
+     * 左右會被裁掉
+     *
+     * 原始影片比較高：
+     * 上下會被裁掉
+     */
+    if (videoRatio > displayRatio) {
+      // 裁左右
+      sourceHeight = videoHeight;
+      sourceWidth = videoHeight * displayRatio;
+
+      sourceX = (videoWidth - sourceWidth) / 2;
+      sourceY = 0;
+    } else {
+      // 裁上下
+      sourceWidth = videoWidth;
+      sourceHeight = videoWidth / displayRatio;
+
+      sourceX = 0;
+      sourceY = (videoHeight - sourceHeight) / 2;
+    }
+
+    // 輸出圖片比例跟瀏覽器看到的一樣
+    canvas.width = Math.round(displayWidth);
+    canvas.height = Math.round(displayHeight);
 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    ctx.drawImage(
+      video,
+
+      // 從原始 video 哪裡開始擷取
+      sourceX,
+      sourceY,
+      sourceWidth,
+      sourceHeight,
+
+      // 畫到 canvas
+      0,
+      0,
+      canvas.width,
+      canvas.height,
+    );
+
     const imageData = canvas.toDataURL('image/png');
 
     const task: PhotoTask = {
@@ -197,14 +258,17 @@ export default function CameraView() {
       image: imageData,
     };
 
-    // ⚡ 改進閃光效果
+    // 閃光
     setFlash(true);
-    // 先清掉上一次可能還在跑的閃光
-    if (flashTimeoutRef.current) clearTimeout(flashTimeoutRef.current);
+
+    if (flashTimeoutRef.current) {
+      clearTimeout(flashTimeoutRef.current);
+    }
+
     flashTimeoutRef.current = globalThis.setTimeout(() => {
       setFlash(false);
       flashTimeoutRef.current = null;
-    }, 100); // 100ms，更明顯閃光
+    }, 100);
 
     const previousTask = photoQueueRef.current.replacePreview(task);
     setPreviewTask(task);
@@ -212,7 +276,7 @@ export default function CameraView() {
       void processNext();
     }
 
-    // 5 秒後自動加入處理隊列最新照片
+    // 5 秒後自動加入處理隊列
     globalThis.setTimeout(() => {
       if (!photoQueueRef.current.confirmPreview(task.id)) {
         return;

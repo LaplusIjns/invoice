@@ -4,6 +4,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.jspecify.annotations.NonNull;
 import org.springframework.stereotype.Service;
 
@@ -24,6 +25,23 @@ public class InvoiceService {
                 "114年11-12月",
                 new InvoicePeriod(
                         "114年11-12月", "97023797", "00507588", Arrays.asList("92377231", "05232592", "78125249")));
+        // 115年01~02月
+        PERIOD_MAP.put(
+                "115年01-02月",
+                new InvoicePeriod(
+                        "115年01-02月", "87510041", "32220522", Arrays.asList("21677046", "44662410", "31262513")));
+        PERIOD_MAP.put(
+                "115年03-04月",
+                new InvoicePeriod(
+                        "115年03-04月", "44140251", "14715309", Arrays.asList("86562747", "79171152", "77925523")));
+        PERIOD_MAP.put(
+                "115年05-06月",
+                new InvoicePeriod(
+                        "115年05-06月", "38548029", "10138845", Arrays.asList("24121106", "28589937", "83663333")));
+    }
+
+    public Set<String> invoicePeriods() {
+        return PERIOD_MAP.keySet();
     }
 
     public InvoiceResult checkInvoice(@NonNull final String periodKey, @NonNull final String invoice) {

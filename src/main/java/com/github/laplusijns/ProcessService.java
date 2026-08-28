@@ -1,5 +1,11 @@
 package com.github.laplusijns;
 
+import com.vaadin.flow.server.VaadinService;
+import com.vaadin.flow.server.VaadinServletRequest;
+import com.vaadin.flow.server.auth.AnonymousAllowed;
+import com.vaadin.hilla.Endpoint;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpSession;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
@@ -13,6 +19,7 @@ import java.util.Base64;
 import java.util.Collections;
 import java.util.Date;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
@@ -20,9 +27,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-
 import javax.imageio.ImageIO;
-
 import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -36,14 +41,6 @@ import org.springframework.core.retry.RetryPolicy;
 import org.springframework.core.retry.RetryTemplate;
 import org.springframework.util.MimeType;
 import org.springframework.util.MimeTypeUtils;
-
-import com.vaadin.flow.server.VaadinService;
-import com.vaadin.flow.server.VaadinServletRequest;
-import com.vaadin.flow.server.auth.AnonymousAllowed;
-import com.vaadin.hilla.Endpoint;
-
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpSession;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Sinks.EmitResult;
 
@@ -64,14 +61,14 @@ public class ProcessService {
     private static final String AI_PROMPT = """
 			你是一個專業的 OCR 與台灣發票分析 AI。
 			任務：分析我提供的台灣發票圖片，準確抽取以下資訊：
-			發票號碼（Invoice Number）
+			發票號碼（invoiceNumber）
 			格式：兩個英文大寫字母 + 減號 + 八位數字，例如 "AB-11223344"
-			發票日期（Invoice Date）
-			格式：台灣民國年 + 月份區間，例如 "104年05-06月"
+			發票日期（invoiceDate）
+			格式：台灣民國年 + 月份區間，例如 "114年05-06月"
 			請以 JSON 格式回傳結果，結構如下：
 			{
-			  "invoice_number": "抽取到的發票號碼",
-			  "invoice_date": "抽取到的發票日期"
+			  "invoiceNumber": "抽取到的發票號碼",
+			  "invoiceDate": "抽取到的發票日期"
 			}
 			注意事項：
 			只輸出 JSON，不要額外文字。
@@ -155,48 +152,102 @@ public class ProcessService {
         return List.of();
     }
 
-    public void process(@NonNull final String base64Image, @NonNull final String jsessionId) {
+    public @NonNull Set<@NonNull String> invoicePeriods() {
+        return invoiceService.invoicePeriods();
+    }
 
-        final var userData = userCache.get(jsessionId);
+    public void process2(
+            @NonNull final String periodKey, @NonNull final String invoiceNum, @NonNull final String jsessionId) {
+        var userData = userCache.get(jsessionId);
         if (userData == null) {
-            return;
+            log.info("沒有使用者");
+            invoiceChannels.createChannel(jsessionId);
+            userData = new UserData();
+            userCache.put(jsessionId, userData);
         }
-
         final List<InvoiceDTO> data = userData.getData();
+        log.info("task start {}", new Date());
+        final Invoice invoice = new Invoice(invoiceNum, periodKey);
 
+        final InvoiceResult result = invoiceService.checkInvoice(invoice.invoiceDate, invoice.invoiceNumber);
+        final String key = UUID.randomUUID().toString();
+
+        final InvoiceDTO invoiceDTO =
+                new InvoiceDTO(key, invoice.invoiceNumber, invoice.invoiceDate, List.of(), result, "");
+        data.add(invoiceDTO);
+        log.info("{}", jsessionId);
+        final EmitResult emitResult = invoiceChannels.tryEmitNext(jsessionId, invoiceDTO);
+        log.info("emitResult {}", emitResult);
+    }
+
+    public void process(@NonNull final String base64Image, @NonNull final String jsessionId) {
+        final String uuid = UUID.randomUUID().toString();
+        final String key = UUID.randomUUID().toString();
+        var userData = userCache.get(jsessionId);
+        if (userData == null) {
+            log.info("沒有使用者");
+            invoiceChannels.createChannel(jsessionId);
+            userData = new UserData();
+            userCache.put(jsessionId, userData);
+        }
+        final List<InvoiceDTO> data = userData.getData();
+        final InvoiceDTO initDTO = new InvoiceDTO(key, "", "", List.of(), InvoiceResult.PROGRESS, uuid);
+        final EmitResult initEmitResult = invoiceChannels.tryEmitNext(jsessionId, initDTO);
+        data.add(initDTO);
+        log.info("exception emitResult {}", initEmitResult);
         log.info("task start {}", new Date());
         // 把 OCR 任務加入隊列，不直接執行
         final boolean bool = taskQueue.offer(() -> {
+            final String[] parts = base64Image.split(";base64,");
+            final byte[] imageBytes = Base64.getDecoder().decode(parts[1]);
+            byte[] resizeBytes = new byte[] {};
             try {
-                final String[] parts = base64Image.split(";base64,");
+                resizeBytes = resizePng(imageBytes, 300);
+            } catch (IOException e) {
+                log.error("resizePng exception", e);
+            }
+            imageCache.put(uuid, imageBytes);
+            imageCache.putThumbnail(uuid, resizeBytes);
+
+            try {
                 final String mimeTypeString = parts[0].replace("data:", "");
-                final byte[] imageBytes = Base64.getDecoder().decode(parts[1]);
-                final byte[] resizeBytes = resizePng(imageBytes, 300);
                 final MimeType mimeType = MimeTypeUtils.parseMimeType(mimeTypeString);
 
                 final Invoice invoice = recognizeInvoice(imageBytes, mimeType);
                 final List<String> qrInvoiceNumbers = invoiceQrCodeReader.readInvoiceNumbers(imageBytes);
 
                 final InvoiceResult result = checkInvoiceResult(invoice);
-                final String uuid = UUID.randomUUID().toString();
-                imageCache.put(uuid, imageBytes);
-                imageCache.putThumbnail(uuid, resizeBytes);
-                final String key = UUID.randomUUID().toString();
 
                 final InvoiceDTO invoiceDTO = new InvoiceDTO(
                         key, invoice.invoiceNumber, invoice.invoiceDate, qrInvoiceNumbers, result, uuid);
-                data.add(invoiceDTO);
+                replaceInvoice(data, invoiceDTO);
                 log.info("{}", jsessionId);
                 final EmitResult emitResult = invoiceChannels.tryEmitNext(jsessionId, invoiceDTO);
                 log.info("emitResult {}", emitResult);
 
             } catch (Exception e) {
                 log.error("invoice OCR task failed", e);
+                final InvoiceDTO invoiceDTO =
+                        new InvoiceDTO(key, e.getClass().getSimpleName(), "", List.of(), InvoiceResult.ERROR_NOT_FOUND, uuid);
+                replaceInvoice(data, invoiceDTO);
+                final EmitResult emitResult = invoiceChannels.tryEmitNext(jsessionId, invoiceDTO);
+                log.info("exception emitResult {}", emitResult);
             }
         });
-
         if (!bool) {
             log.error("序列出錯");
+        }
+    }
+
+    private void replaceInvoice(final List<InvoiceDTO> data, final InvoiceDTO invoiceDTO) {
+        synchronized (data) {
+            for (int index = 0; index < data.size(); index++) {
+                if (data.get(index).key().equals(invoiceDTO.key())) {
+                    data.set(index, invoiceDTO);
+                    return;
+                }
+            }
+            data.add(invoiceDTO);
         }
     }
 
@@ -350,8 +401,19 @@ public class ProcessService {
             this.invoiceDate = invoiceDate.replaceAll("\\s+", "");
             final Pattern pattern = Pattern.compile("\\d{3}年\\d{2}-\\d{2}月");
             final Matcher matcher = pattern.matcher(this.invoiceDate);
+
+            final Pattern pattern2 = Pattern.compile("(\\d+)年(\\d{1,2})-(\\d{1,2})月");
+            final Matcher matcher2 = pattern2.matcher(this.invoiceDate);
             if (matcher.find()) {
                 this.invoiceDate = matcher.group();
+            }
+            if (matcher2.find()) {
+                final String newStr = "%s年%02d-%02d月"
+                        .formatted(
+                                matcher.group(1),
+                                Integer.parseInt(matcher.group(2)),
+                                Integer.parseInt(matcher.group(3)));
+                this.invoiceDate = newStr;
             }
         }
 
@@ -366,7 +428,8 @@ public class ProcessService {
             this.invoiceDate = NA;
         }
     }
-    private static byte[] resizePng(byte[] pngBytes, int maxSize) throws IOException {
+
+    private static byte[] resizePng(final byte[] pngBytes, final int maxSize) throws IOException {
         BufferedImage original;
         try (ByteArrayInputStream bis = new ByteArrayInputStream(pngBytes)) {
             original = ImageIO.read(bis);
@@ -376,37 +439,27 @@ public class ProcessService {
             throw new IllegalArgumentException("Invalid image data");
         }
 
-        int width = original.getWidth();
-        int height = original.getHeight();
+        final int width = original.getWidth();
+        final int height = original.getHeight();
 
         // 2. 計算等比例縮放
-        float scale = Math.min(
-                (float) maxSize / width,
-                (float) maxSize / height
-        );
+        final float scale = Math.min((float) maxSize / width, (float) maxSize / height);
 
         // 如果本來就 <= 300，可以直接回傳
         if (scale >= 1.0f) {
             return pngBytes;
         }
 
-        int newWidth = Math.round(width * scale);
-        int newHeight = Math.round(height * scale);
+        final int newWidth = Math.round(width * scale);
+        final int newHeight = Math.round(height * scale);
 
         // 3. 建立縮圖（保留透明背景）
-        BufferedImage resized = new BufferedImage(
-                newWidth,
-                newHeight,
-                BufferedImage.TYPE_INT_ARGB
-        );
+        final BufferedImage resized = new BufferedImage(newWidth, newHeight, BufferedImage.TYPE_INT_ARGB);
 
-        Graphics2D g2d = resized.createGraphics();
-        g2d.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
-                RenderingHints.VALUE_INTERPOLATION_BICUBIC);
-        g2d.setRenderingHint(RenderingHints.KEY_RENDERING,
-                RenderingHints.VALUE_RENDER_QUALITY);
-        g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
-                RenderingHints.VALUE_ANTIALIAS_ON);
+        final Graphics2D g2d = resized.createGraphics();
+        g2d.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+        g2d.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+        g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 
         g2d.drawImage(original, 0, 0, newWidth, newHeight, null);
         g2d.dispose();
