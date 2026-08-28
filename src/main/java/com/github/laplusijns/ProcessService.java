@@ -56,6 +56,7 @@ public class ProcessService {
     ImageCache imageCache;
     InvoiceChannels invoiceChannels;
     PaddleXOcrClient paddleXOcrClient;
+    InvoiceQrCodeReader invoiceQrCodeReader;
     RetryTemplate retryTemplate;
     UserCache userCache;
     private final ExecutorService workerExecutor = Executors.newSingleThreadExecutor();
@@ -110,7 +111,8 @@ public class ProcessService {
             final ImageCache imageCache,
             final InvoiceChannels invoiceChannels,
             final UserCache userCache,
-            final PaddleXOcrClient paddleXOcrClient) {
+            final PaddleXOcrClient paddleXOcrClient,
+            final InvoiceQrCodeReader invoiceQrCodeReader) {
         super();
         this.chatClient = chatClient;
         this.invoiceService = invoiceService;
@@ -118,6 +120,7 @@ public class ProcessService {
         this.invoiceChannels = invoiceChannels;
         this.userCache = userCache;
         this.paddleXOcrClient = paddleXOcrClient;
+        this.invoiceQrCodeReader = invoiceQrCodeReader;
 
         final var retryPolicy = RetryPolicy.builder()
                 .includes(Exception.class)
@@ -172,6 +175,7 @@ public class ProcessService {
                 final MimeType mimeType = MimeTypeUtils.parseMimeType(mimeTypeString);
 
                 final Invoice invoice = recognizeInvoice(imageBytes, mimeType);
+                final List<String> qrInvoiceNumbers = invoiceQrCodeReader.readInvoiceNumbers(imageBytes);
 
                 final InvoiceResult result = checkInvoiceResult(invoice);
                 final String uuid = UUID.randomUUID().toString();
@@ -179,8 +183,8 @@ public class ProcessService {
                 imageCache.putThumbnail(uuid, resizeBytes);
                 final String key = UUID.randomUUID().toString();
 
-                final InvoiceDTO invoiceDTO =
-                        new InvoiceDTO(key, invoice.invoiceNumber, invoice.invoiceDate, result, uuid);
+                final InvoiceDTO invoiceDTO = new InvoiceDTO(
+                        key, invoice.invoiceNumber, invoice.invoiceDate, qrInvoiceNumbers, result, uuid);
                 data.add(invoiceDTO);
                 log.info("{}", jsessionId);
                 final EmitResult emitResult = invoiceChannels.tryEmitNext(jsessionId, invoiceDTO);
@@ -230,6 +234,7 @@ public class ProcessService {
             final String key, final String jsessionId, final byte[] imageBytes, final MimeType mimeType) {
         try {
             final Invoice invoice = recognizeInvoice(imageBytes, mimeType);
+            final List<String> qrInvoiceNumbers = invoiceQrCodeReader.readInvoiceNumbers(imageBytes);
             final InvoiceResult result = checkInvoiceResult(invoice);
             final UserData userData = userCache.get(jsessionId);
             if (userData == null) {
@@ -246,6 +251,7 @@ public class ProcessService {
                                 existingInvoice.key(),
                                 invoice.invoiceNumber,
                                 invoice.invoiceDate,
+                                qrInvoiceNumbers,
                                 result,
                                 existingInvoice.imageUrl());
                         data.set(index, updatedInvoice);

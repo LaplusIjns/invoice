@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { Notification, Button } from '@vaadin/react-components';
 import { ProcessService } from 'Frontend/generated/endpoints';
 import { useBlocker, BlockerFunction } from 'react-router';
+import { PhotoTaskQueue, type PhotoTask } from 'Frontend/photo-task-queue';
 
 export const config: ViewConfig = {
   menu: { order: 0, icon: 'line-awesome/svg/camera-solid.svg' },
@@ -10,16 +11,27 @@ export const config: ViewConfig = {
 };
 
 // 封裝導航前阻止 hook
-export function useBeforeNavigate(when: boolean, onBeforeNavigate: () => void) {
-  const blockFn: BlockerFunction = ({ currentLocation, nextLocation }) =>
-    when && currentLocation.pathname !== nextLocation.pathname;
+export function useBeforeNavigate(when: () => boolean, onBeforeNavigate: () => Promise<void>) {
+  const blockFn = useCallback<BlockerFunction>(
+    ({ currentLocation, nextLocation }) => when() && currentLocation.pathname !== nextLocation.pathname,
+    [when],
+  );
 
   const blocker = useBlocker(blockFn);
+  const handlingRef = useRef(false);
 
   useEffect(() => {
-    if (blocker.state === 'blocked') {
-      onBeforeNavigate();
-      blocker.proceed();
+    if (blocker.state === 'blocked' && !handlingRef.current) {
+      handlingRef.current = true;
+      void onBeforeNavigate()
+        .then(() => blocker.proceed())
+        .catch((error) => {
+          console.error('離開頁面前上傳失敗', error);
+          blocker.reset();
+        })
+        .finally(() => {
+          handlingRef.current = false;
+        });
     }
   }, [blocker, onBeforeNavigate]);
 }
@@ -27,20 +39,16 @@ export function useBeforeNavigate(when: boolean, onBeforeNavigate: () => void) {
 export default function CameraView() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const jsessionidRef = useRef<any>(null);
+  const jsessionidRef = useRef<string | null>(null);
 
   const [flash, setFlash] = useState(false);
   const flashTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const [previewQueue, setPreviewQueue] = useState<PhotoTask[]>([]);
-
-  type PhotoTask = {
-    id: string;
-    image: string;
-  };
+  const [previewTask, setPreviewTask] = useState<PhotoTask | null>(null);
 
   // 上傳隊列及處理狀態
-  const queueRef = useRef<PhotoTask[]>([]);
-  const processingRef = useRef(false);
+  const photoQueueRef = useRef(new PhotoTaskQueue());
+  const drainPromiseRef = useRef<Promise<void> | null>(null);
+  const activeTaskRef = useRef<PhotoTask | null>(null);
 
   useEffect(() => {
     ProcessService.jsessionId().then((jsessionid: string) => {
@@ -48,67 +56,93 @@ export default function CameraView() {
     });
   }, []);
 
-  // 處理下一張圖片
-  const processNext = useCallback(async () => {
-    if (processingRef.current) return;
-    const next = queueRef.current[0];
-    if (!next) return;
-
-    processingRef.current = true;
-
-    Notification.show('圖片已進入處理流程', {
-      duration: 2000,
-      theme: 'success',
-      position: 'top-center',
-    });
-
-    const start = Date.now();
-
-    try {
-      await ProcessService.process(next.image, jsessionidRef.current);
-    } catch (e) {
-      console.error(e);
-      Notification.show('圖片處理失敗', {
-        theme: 'error',
-        position: 'top-center',
-      });
-    } finally {
-      const elapsed = Date.now() - start;
-      const MIN_PREVIEW_TIME = 100;
-      const remaining = Math.max(0, MIN_PREVIEW_TIME - elapsed);
-
-      setTimeout(() => {
-        processingRef.current = false;
-        queueRef.current.shift();
-        if (queueRef.current.length > 0) {
-          queueMicrotask(processNext);
-        }
-      }, remaining);
+  const getSessionId = useCallback(async () => {
+    if (jsessionidRef.current) {
+      return jsessionidRef.current;
     }
+
+    const jsessionid = await ProcessService.jsessionId();
+    jsessionidRef.current = jsessionid;
+    return jsessionid;
   }, []);
 
-  // 阻止離開頁面時隊列還在上傳
-  useBeforeNavigate(queueRef.current.length > 0, async () => {
+  // 處理下一張圖片
+  const processNext = useCallback((): Promise<void> => {
+    if (drainPromiseRef.current) {
+      return drainPromiseRef.current;
+    }
+    if (!photoQueueRef.current.hasReady()) {
+      return Promise.resolve();
+    }
+
+    const drainPromise = (async () => {
+      let next = photoQueueRef.current.takeNext();
+      while (next) {
+        activeTaskRef.current = next;
+        Notification.show('圖片已進入處理流程', {
+          duration: 2000,
+          theme: 'success',
+          position: 'top-center',
+        });
+
+        const start = Date.now();
+
+        try {
+          await ProcessService.process(next.image, await getSessionId());
+        } catch (e) {
+          console.error(e);
+          Notification.show('圖片處理失敗', {
+            theme: 'error',
+            position: 'top-center',
+          });
+        } finally {
+          activeTaskRef.current = null;
+          const elapsed = Date.now() - start;
+          const remaining = Math.max(0, 100 - elapsed);
+          if (remaining > 0) {
+            await new Promise((resolve) => globalThis.setTimeout(resolve, remaining));
+          }
+        }
+
+        next = photoQueueRef.current.takeNext();
+      }
+    })();
+
+    drainPromiseRef.current = drainPromise.finally(() => {
+      drainPromiseRef.current = null;
+      if (photoQueueRef.current.hasReady()) {
+        void processNext();
+      }
+    });
+    return drainPromiseRef.current;
+  }, [getSessionId]);
+
+  const hasPendingTasks = useCallback(() => photoQueueRef.current.hasPending() || drainPromiseRef.current !== null, []);
+
+  const flushPendingTasks = useCallback(async () => {
     Notification.show('正在上傳...', {
       duration: 5000,
       position: 'top-center',
       theme: 'warning',
     });
 
-    const uploads = queueRef.current.map((t) =>
-      ProcessService.process(t.image, jsessionidRef.current).catch((err) => console.error('上傳失敗', err)),
-    );
+    if (photoQueueRef.current.flushPreview()) {
+      setPreviewTask(null);
+    }
+    await processNext();
+  }, [processNext]);
 
-    await Promise.all(uploads);
-    queueRef.current = [];
-  });
+  // 離開頁面前先把預覽中及等待中的圖片全部交給後端 OCR 隊列
+  useBeforeNavigate(hasPendingTasks, flushPendingTasks);
 
   // 離開頁面時自動上傳
   useEffect(() => {
     const handler = (e: BeforeUnloadEvent) => {
-      if (queueRef.current.length > 0) {
+      const pending = photoQueueRef.current.snapshotPending();
+      const tasks = activeTaskRef.current ? [activeTaskRef.current, ...pending] : pending;
+      if (tasks.length > 0) {
         e.preventDefault();
-        queueRef.current.forEach((t) => navigator.sendBeacon('/process', JSON.stringify(t)));
+        tasks.forEach((task) => navigator.sendBeacon('/process', JSON.stringify(task)));
       }
     };
     window.addEventListener('beforeunload', handler);
@@ -172,25 +206,20 @@ export default function CameraView() {
       flashTimeoutRef.current = null;
     }, 100); // 100ms，更明顯閃光
 
-    const preDate = previewQueue;
-    setPreviewQueue([task]);
-    // 更新 previewQueue
-    preDate.forEach((oldTask: any) => {
-      queueRef.current.push(oldTask);
-    });
-    processNext();
+    const previousTask = photoQueueRef.current.replacePreview(task);
+    setPreviewTask(task);
+    if (previousTask) {
+      void processNext();
+    }
 
     // 5 秒後自動加入處理隊列最新照片
     globalThis.setTimeout(() => {
-      setPreviewQueue((prev) => {
-        const exists = prev.find((t) => t.id === task.id);
-        if (!exists) return prev;
+      if (!photoQueueRef.current.confirmPreview(task.id)) {
+        return;
+      }
 
-        queueRef.current.push(task);
-        processNext();
-
-        return [];
-      });
+      setPreviewTask((current) => (current?.id === task.id ? null : current));
+      void processNext();
     }, 5000);
   };
 
@@ -201,7 +230,12 @@ export default function CameraView() {
           ref={videoRef}
           autoPlay
           playsInline
-          style={{ height: '90vh', width: '100%', objectFit: 'cover', display: 'block' }}
+          style={{
+            height: '90vh',
+            width: '100%',
+            objectFit: 'cover',
+            display: 'block',
+          }}
         />
 
         {flash && (
@@ -227,22 +261,17 @@ export default function CameraView() {
 
       <canvas ref={canvasRef} style={{ display: 'none' }} />
 
-      {previewQueue.length > 0 && (
-        <Notification
-          opened={previewQueue.length > 0} // <- 當 queue 為空時自動關閉
-          position="top-end"
-          theme="contrast no-close-button"
-          duration={0}>
+      {previewTask && (
+        <Notification opened={true} position="top-end" theme="contrast no-close-button" duration={0}>
           <div className="flex flex-col">
-            <img src={previewQueue[previewQueue.length - 1].image} style={{ width: '20vw' }} />
+            <img src={previewTask.image} style={{ width: '20vw' }} />
             <Button
               className="border border-error bg-error-50 font-bold text-2xl"
-              onClick={() =>
-                setPreviewQueue((prev) => {
-                  const newQueue = prev.slice(0, prev.length - 1); // 刪掉最後一筆
-                  return newQueue;
-                })
-              }>
+              onClick={() => {
+                if (photoQueueRef.current.discardPreview(previewTask.id)) {
+                  setPreviewTask(null);
+                }
+              }}>
               刪除
             </Button>
           </div>

@@ -9,6 +9,10 @@ import {
 import { useState, useEffect, useRef } from "react";
 import { ProcessService } from "Frontend/generated/endpoints";
 import InvoiceDTO from "Frontend/generated/com/github/laplusijns/InvoiceDTO";
+import {
+  getInvoiceVerificationStatus,
+  type InvoiceVerificationStatus,
+} from "Frontend/invoice-verification";
 export const config: ViewConfig = {
   menu: { order: 1, icon: "line-awesome/svg/money-bill-solid.svg" },
   title: "result",
@@ -59,6 +63,29 @@ export default function ResultView() {
         onClick={() => setSelectedPreview(item.imageUrl)}
       />
     );
+  }
+  function QrInvoiceNumbersRenderer({
+    item,
+  }: Readonly<{ item: InvoiceDTO }>) {
+    const qrInvoiceNumbers = item.qrInvoiceNumbers ?? [];
+    return qrInvoiceNumbers.length > 0 ? (
+      <span>{qrInvoiceNumbers.join(", ")}</span>
+    ) : (
+      <span aria-label="沒有 QR Code 發票號碼">—</span>
+    );
+  }
+  function VerificationRenderer({ item }: Readonly<{ item: InvoiceDTO }>) {
+    const status = getInvoiceVerificationStatus(
+      item.invoiceNumber,
+      item.qrInvoiceNumbers,
+    );
+    const colors: Record<InvoiceVerificationStatus, string> = {
+      通過: "var(--lumo-success-text-color, #147d36)",
+      可疑: "var(--lumo-error-text-color, #b42318)",
+      "無 QR": "var(--lumo-secondary-text-color, #667085)",
+    };
+
+    return <strong style={{ color: colors[status] }}>{status}</strong>;
   }
   function ActionRenderer({ item }: Readonly<{ item: InvoiceDTO }>) {
     const isReprocessing = reprocessingKeys.has(item.key);
@@ -149,6 +176,18 @@ export default function ResultView() {
           path="invoiceNumber"
           autoWidth
           flexGrow={2}
+        />
+        <GridColumn
+          header="QR Code 發票號碼"
+          renderer={QrInvoiceNumbersRenderer}
+          autoWidth
+          flexGrow={2}
+        />
+        <GridColumn
+          header="Paddle / QR 比對"
+          renderer={VerificationRenderer}
+          autoWidth
+          flexGrow={1}
         />
         <GridColumn header="發票日期" path="invoiceDate" />
         <GridColumn header="結果" path="result" autoWidth flexGrow={2} />
