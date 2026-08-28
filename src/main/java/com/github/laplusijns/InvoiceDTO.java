@@ -10,5 +10,6 @@ public record InvoiceDTO(
         @NonNull String invoiceDate,
         @NonNull List<@NonNull String> qrInvoiceNumbers,
         @NonNull InvoiceResult result,
-        @NonNull String imageUrl)
+        @NonNull String imageUrl,
+        @NonNull InvoiceProcessingStatus processingStatus)
         implements Serializable {}

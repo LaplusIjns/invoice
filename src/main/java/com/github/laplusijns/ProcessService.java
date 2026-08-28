@@ -172,7 +172,14 @@ public class ProcessService {
         final String key = UUID.randomUUID().toString();
 
         final InvoiceDTO invoiceDTO =
-                new InvoiceDTO(key, invoice.invoiceNumber, invoice.invoiceDate, List.of(), result, "");
+                new InvoiceDTO(
+                        key,
+                        invoice.invoiceNumber,
+                        invoice.invoiceDate,
+                        List.of(),
+                        result,
+                        "",
+                        InvoiceProcessingStatus.PENDING_CONFIRMATION);
         data.add(invoiceDTO);
         log.info("{}", jsessionId);
         final EmitResult emitResult = invoiceChannels.tryEmitNext(jsessionId, invoiceDTO);
@@ -190,25 +197,27 @@ public class ProcessService {
             userCache.put(jsessionId, userData);
         }
         final List<InvoiceDTO> data = userData.getData();
-        final InvoiceDTO initDTO = new InvoiceDTO(key, "", "", List.of(), InvoiceResult.PROGRESS, uuid);
+        final InvoiceDTO initDTO = new InvoiceDTO(
+                key, "", "", List.of(), InvoiceResult.PROGRESS, uuid, InvoiceProcessingStatus.QUEUED);
         final EmitResult initEmitResult = invoiceChannels.tryEmitNext(jsessionId, initDTO);
         data.add(initDTO);
         log.info("exception emitResult {}", initEmitResult);
         log.info("task start {}", new Date());
         // 把 OCR 任務加入隊列，不直接執行
         final boolean bool = taskQueue.offer(() -> {
-            final String[] parts = base64Image.split(";base64,");
-            final byte[] imageBytes = Base64.getDecoder().decode(parts[1]);
-            byte[] resizeBytes = new byte[] {};
+            updateInvoiceStatus(data, jsessionId, key, InvoiceProcessingStatus.RECOGNIZING);
             try {
-                resizeBytes = resizePng(imageBytes, 300);
-            } catch (IOException e) {
-                log.error("resizePng exception", e);
-            }
-            imageCache.put(uuid, imageBytes);
-            imageCache.putThumbnail(uuid, resizeBytes);
+                final String[] parts = base64Image.split(";base64,");
+                final byte[] imageBytes = Base64.getDecoder().decode(parts[1]);
+                byte[] resizeBytes = new byte[] {};
+                try {
+                    resizeBytes = resizePng(imageBytes, 300);
+                } catch (IOException e) {
+                    log.error("resizePng exception", e);
+                }
+                imageCache.put(uuid, imageBytes);
+                imageCache.putThumbnail(uuid, resizeBytes);
 
-            try {
                 final String mimeTypeString = parts[0].replace("data:", "");
                 final MimeType mimeType = MimeTypeUtils.parseMimeType(mimeTypeString);
 
@@ -218,7 +227,13 @@ public class ProcessService {
                 final InvoiceResult result = checkInvoiceResult(invoice);
 
                 final InvoiceDTO invoiceDTO = new InvoiceDTO(
-                        key, invoice.invoiceNumber, invoice.invoiceDate, qrInvoiceNumbers, result, uuid);
+                        key,
+                        invoice.invoiceNumber,
+                        invoice.invoiceDate,
+                        qrInvoiceNumbers,
+                        result,
+                        uuid,
+                        InvoiceProcessingStatus.PENDING_CONFIRMATION);
                 replaceInvoice(data, invoiceDTO);
                 log.info("{}", jsessionId);
                 final EmitResult emitResult = invoiceChannels.tryEmitNext(jsessionId, invoiceDTO);
@@ -226,8 +241,14 @@ public class ProcessService {
 
             } catch (Exception e) {
                 log.error("invoice OCR task failed", e);
-                final InvoiceDTO invoiceDTO =
-                        new InvoiceDTO(key, e.getClass().getSimpleName(), "", List.of(), InvoiceResult.ERROR_NOT_FOUND, uuid);
+                final InvoiceDTO invoiceDTO = new InvoiceDTO(
+                        key,
+                        "",
+                        "",
+                        List.of(),
+                        InvoiceResult.ERROR_RECOGNITION,
+                        uuid,
+                        InvoiceProcessingStatus.FAILED);
                 replaceInvoice(data, invoiceDTO);
                 final EmitResult emitResult = invoiceChannels.tryEmitNext(jsessionId, invoiceDTO);
                 log.info("exception emitResult {}", emitResult);
@@ -235,6 +256,38 @@ public class ProcessService {
         });
         if (!bool) {
             log.error("序列出錯");
+            updateInvoiceStatus(data, jsessionId, key, InvoiceProcessingStatus.FAILED);
+        }
+    }
+
+    private void updateInvoiceStatus(
+            final List<InvoiceDTO> data,
+            final String jsessionId,
+            final String key,
+            final InvoiceProcessingStatus processingStatus) {
+        InvoiceDTO updatedInvoice = null;
+        synchronized (data) {
+            for (int index = 0; index < data.size(); index++) {
+                final InvoiceDTO existingInvoice = data.get(index);
+                if (existingInvoice.key().equals(key)) {
+                    updatedInvoice = new InvoiceDTO(
+                            existingInvoice.key(),
+                            existingInvoice.invoiceNumber(),
+                            existingInvoice.invoiceDate(),
+                            existingInvoice.qrInvoiceNumbers(),
+                            processingStatus == InvoiceProcessingStatus.FAILED
+                                    ? InvoiceResult.ERROR_RECOGNITION
+                                    : existingInvoice.result(),
+                            existingInvoice.imageUrl(),
+                            processingStatus);
+                    data.set(index, updatedInvoice);
+                    break;
+                }
+            }
+        }
+        if (updatedInvoice != null) {
+            final EmitResult emitResult = invoiceChannels.tryEmitNext(jsessionId, updatedInvoice);
+            log.info("invoice {} status changed to {}; emitResult {}", key, processingStatus, emitResult);
         }
     }
 
@@ -277,21 +330,26 @@ public class ProcessService {
         }
 
         final MimeType mimeType = detectMimeType(imageBytes);
-        return taskQueue.offer(() -> reprocessInvoice(key, jsessionId, imageBytes, mimeType));
+        updateInvoiceStatus(data, jsessionId, key, InvoiceProcessingStatus.QUEUED);
+        final boolean accepted = taskQueue.offer(() -> reprocessInvoice(key, jsessionId, imageBytes, mimeType));
+        if (!accepted) {
+            updateInvoiceStatus(data, jsessionId, key, InvoiceProcessingStatus.FAILED);
+        }
+        return accepted;
     }
 
     private void reprocessInvoice(
             final String key, final String jsessionId, final byte[] imageBytes, final MimeType mimeType) {
+        final UserData userData = userCache.get(jsessionId);
+        if (userData == null) {
+            return;
+        }
+        final List<InvoiceDTO> data = userData.getData();
+        updateInvoiceStatus(data, jsessionId, key, InvoiceProcessingStatus.RECOGNIZING);
         try {
             final Invoice invoice = recognizeInvoice(imageBytes, mimeType);
             final List<String> qrInvoiceNumbers = invoiceQrCodeReader.readInvoiceNumbers(imageBytes);
             final InvoiceResult result = checkInvoiceResult(invoice);
-            final UserData userData = userCache.get(jsessionId);
-            if (userData == null) {
-                return;
-            }
-
-            final List<InvoiceDTO> data = userData.getData();
             InvoiceDTO updatedInvoice = null;
             synchronized (data) {
                 for (int index = 0; index < data.size(); index++) {
@@ -303,7 +361,8 @@ public class ProcessService {
                                 invoice.invoiceDate,
                                 qrInvoiceNumbers,
                                 result,
-                                existingInvoice.imageUrl());
+                                existingInvoice.imageUrl(),
+                                InvoiceProcessingStatus.PENDING_CONFIRMATION);
                         data.set(index, updatedInvoice);
                         break;
                     }
@@ -317,6 +376,7 @@ public class ProcessService {
             log.info("invoice {} reprocessed; emitResult {}", key, emitResult);
         } catch (Exception e) {
             log.error("invoice {} reprocessing failed", key, e);
+            updateInvoiceStatus(data, jsessionId, key, InvoiceProcessingStatus.FAILED);
         }
     }
 

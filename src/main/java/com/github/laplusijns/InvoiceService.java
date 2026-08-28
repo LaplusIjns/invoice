@@ -10,6 +10,7 @@ import java.util.Map;
 import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -25,6 +26,7 @@ public class InvoiceService {
     private final Object refreshMonitor = new Object();
     private volatile PrizeSnapshot snapshot = new PrizeSnapshot(Map.of(), Instant.EPOCH, false);
 
+    @Autowired
     public InvoiceService(
             final InvoicePeriodSource periodSource,
             @Value("${invoice.prizes.refresh-interval:6h}") final Duration refreshInterval,

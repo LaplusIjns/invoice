@@ -22,7 +22,6 @@ class PaddleXOcrClient {
 
     @Autowired
     PaddleXOcrClient(
-            final RestClient.Builder restClientBuilder,
             final InvoiceTextExtractor invoiceTextExtractor,
             @Value("${invoice.ocr.paddlex.base-url:http://127.0.0.1:16601}") final String baseUrl,
             @Value("${invoice.ocr.paddlex.endpoint:/ocr}") final String endpoint,
@@ -31,7 +30,7 @@ class PaddleXOcrClient {
         final var requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(connectTimeout);
         requestFactory.setReadTimeout(readTimeout);
-        this.restClient = restClientBuilder
+        this.restClient = RestClient.builder()
                 .baseUrl(removeTrailingSlash(baseUrl))
                 .requestFactory(requestFactory)
                 .build();

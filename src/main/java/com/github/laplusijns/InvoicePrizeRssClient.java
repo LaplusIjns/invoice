@@ -12,6 +12,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilderFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -37,6 +38,7 @@ class InvoicePrizeRssClient implements InvoicePeriodSource {
     private final RestClient restClient;
     private final URI rssUri;
 
+    @Autowired
     InvoicePrizeRssClient(
             @Value("${invoice.prizes.rss-url:https://invoice.etax.nat.gov.tw/invoice.xml}") final URI rssUri,
             @Value("${invoice.prizes.connect-timeout:5s}") final Duration connectTimeout,

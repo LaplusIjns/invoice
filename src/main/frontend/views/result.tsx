@@ -19,6 +19,17 @@ import {
   getInvoiceVerificationStatus,
   type InvoiceVerificationStatus,
 } from 'Frontend/invoice-verification';
+import './result.css';
+
+type InvoiceProcessingStatus = '排隊中' | '辨識中' | '失敗' | '待確認';
+
+function getProcessingStatus(item: InvoiceDTO): InvoiceProcessingStatus {
+  return (
+    item as InvoiceDTO & {
+      processingStatus?: InvoiceProcessingStatus;
+    }
+  ).processingStatus ?? '待確認';
+}
 
 export const config: ViewConfig = {
   menu: { order: 1, icon: 'line-awesome/svg/money-bill-solid.svg' },
@@ -187,7 +198,27 @@ export default function ResultView() {
     );
   }
 
+  function ProcessingStatusRenderer({ item }: Readonly<{ item: InvoiceDTO }>) {
+    const status = getProcessingStatus(item);
+    const statusClassNames: Record<InvoiceProcessingStatus, string> = {
+      排隊中: 'invoice-status invoice-status--queued',
+      辨識中: 'invoice-status invoice-status--recognizing',
+      失敗: 'invoice-status invoice-status--failed',
+      待確認: 'invoice-status invoice-status--pending',
+    };
+
+    return (
+      <span className={statusClassNames[status] ?? 'invoice-status'} role="status" aria-label={`辨識狀態：${status}`}>
+        {status}
+      </span>
+    );
+  }
+
   function VerificationRenderer({ item }: Readonly<{ item: InvoiceDTO }>) {
+    if (getProcessingStatus(item) !== '待確認') {
+      return <span aria-label="尚無比對結果">—</span>;
+    }
+
     const status = getInvoiceVerificationStatus(item.invoiceNumber, item.qrInvoiceNumbers);
     const colors: Record<InvoiceVerificationStatus, string> = {
       通過: 'var(--lumo-success-text-color, #147d36)',
@@ -200,12 +231,14 @@ export default function ResultView() {
 
   function ActionRenderer({ item }: Readonly<{ item: InvoiceDTO }>) {
     const isReprocessing = reprocessingKeys.has(item.key);
+    const processingStatus = getProcessingStatus(item);
+    const isProcessing = processingStatus === '排隊中' || processingStatus === '辨識中';
 
     return (
       <div className="flex gap-s p-0 m-0">
         <Button
           theme="primary"
-          disabled={isReprocessing || !item.imageUrl}
+          disabled={isReprocessing || isProcessing || !item.imageUrl}
           className="p-0 m-0"
           onClick={async () => {
             setReprocessingKeys((previous) => new Set(previous).add(item.key));
@@ -231,7 +264,7 @@ export default function ResultView() {
               });
             }
           }}>
-          {isReprocessing ? '送出中…' : '重新辨識'}
+          {isReprocessing ? '送出中…' : isProcessing ? '辨識處理中' : '重新辨識'}
         </Button>
         <Button
           theme="error primary"
@@ -270,6 +303,7 @@ export default function ResultView() {
       <Grid items={invoices} className="w-full" theme="row-stripes wrap-cell-content compact">
         <GridColumn header="操作" renderer={ActionRenderer} autoWidth flexGrow={0} />
         <GridColumn header="圖片" path="imageUrl" renderer={ImageRenderer} flexGrow={0} autoWidth />
+        <GridColumn header="狀態" renderer={ProcessingStatusRenderer} autoWidth flexGrow={0} />
         <GridColumn header="發票號碼" path="invoiceNumber" autoWidth flexGrow={2} />
         <GridColumn header="QR Code 發票號碼" renderer={QrInvoiceNumbersRenderer} autoWidth flexGrow={2} />
         <GridColumn header="Paddle / QR 比對" renderer={VerificationRenderer} autoWidth flexGrow={1} />

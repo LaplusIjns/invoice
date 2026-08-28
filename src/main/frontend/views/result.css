@@ -1,0 +1,49 @@
+.invoice-status {
+  display: inline-flex;
+  align-items: center;
+  min-width: 4.5rem;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 0.2rem 0.65rem;
+  font-size: var(--lumo-font-size-s);
+  font-weight: 700;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.invoice-status--queued {
+  background: var(--lumo-contrast-10pct);
+  color: var(--lumo-secondary-text-color);
+}
+
+.invoice-status--recognizing {
+  background: var(--lumo-primary-color-10pct);
+  color: var(--lumo-primary-text-color);
+}
+
+.invoice-status--recognizing::before {
+  width: 0.65rem;
+  height: 0.65rem;
+  margin-right: 0.4rem;
+  border: 2px solid currentcolor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  content: '';
+  animation: invoice-status-spin 0.8s linear infinite;
+}
+
+.invoice-status--failed {
+  background: var(--lumo-error-color-10pct);
+  color: var(--lumo-error-text-color);
+}
+
+.invoice-status--pending {
+  background: var(--lumo-warning-color-10pct, #fff3cd);
+  color: var(--lumo-warning-text-color, #7a5200);
+}
+
+@keyframes invoice-status-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
