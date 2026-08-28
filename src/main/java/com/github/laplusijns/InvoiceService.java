@@ -1,79 +1,82 @@
 package com.github.laplusijns;
 
-import java.util.Arrays;
-import java.util.HashMap;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import org.jspecify.annotations.NonNull;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 @Service
 public class InvoiceService {
 
-    private static final Map<String, InvoicePeriod> PERIOD_MAP = new HashMap<>();
+    private static final Logger log = LoggerFactory.getLogger(InvoiceService.class);
 
-    static {
-        // 114年09~10月
-        PERIOD_MAP.put(
-                "114年09-10月",
-                new InvoicePeriod(
-                        "114年09-10月", "25834483", "46587380", Arrays.asList("41016094", "98081574", "07309261")));
+    private final InvoicePeriodSource periodSource;
+    private final Duration refreshInterval;
+    private final Duration failureRetryInterval;
+    private final Clock clock;
+    private final Object refreshMonitor = new Object();
+    private volatile PrizeSnapshot snapshot = new PrizeSnapshot(Map.of(), Instant.EPOCH, false);
 
-        // 114年11~12月（⚠️ 之後開獎再填）
-        PERIOD_MAP.put(
-                "114年11-12月",
-                new InvoicePeriod(
-                        "114年11-12月", "97023797", "00507588", Arrays.asList("92377231", "05232592", "78125249")));
-        // 115年01~02月
-        PERIOD_MAP.put(
-                "115年01-02月",
-                new InvoicePeriod(
-                        "115年01-02月", "87510041", "32220522", Arrays.asList("21677046", "44662410", "31262513")));
-        PERIOD_MAP.put(
-                "115年03-04月",
-                new InvoicePeriod(
-                        "115年03-04月", "44140251", "14715309", Arrays.asList("86562747", "79171152", "77925523")));
-        PERIOD_MAP.put(
-                "115年05-06月",
-                new InvoicePeriod(
-                        "115年05-06月", "38548029", "10138845", Arrays.asList("24121106", "28589937", "83663333")));
+    public InvoiceService(
+            final InvoicePeriodSource periodSource,
+            @Value("${invoice.prizes.refresh-interval:6h}") final Duration refreshInterval,
+            @Value("${invoice.prizes.failure-retry-interval:5m}") final Duration failureRetryInterval) {
+        this(periodSource, refreshInterval, failureRetryInterval, Clock.systemUTC());
     }
 
-    public Set<String> invoicePeriods() {
-        return PERIOD_MAP.keySet();
+    InvoiceService(
+            final InvoicePeriodSource periodSource,
+            final Duration refreshInterval,
+            final Duration failureRetryInterval,
+            final Clock clock) {
+        if (refreshInterval.isNegative() || failureRetryInterval.isNegative()) {
+            throw new IllegalArgumentException("Invoice prize refresh intervals cannot be negative");
+        }
+        this.periodSource = periodSource;
+        this.refreshInterval = refreshInterval;
+        this.failureRetryInterval = failureRetryInterval;
+        this.clock = clock;
+    }
+
+    public List<String> invoicePeriods() {
+        return List.copyOf(refreshIfNeeded().periods().keySet());
     }
 
     public InvoiceResult checkInvoice(@NonNull final String periodKey, @NonNull final String invoice) {
-
-        final InvoicePeriod period = PERIOD_MAP.get(periodKey);
-        if (period == null) {
-            return InvoiceResult.ERROR_NOT_FOUND;
-        }
-
-        if (invoice.length() != 8) {
+        if (!invoice.matches("\\d{8}")) {
             return InvoiceResult.ERROR_EIGHT_NUMBER;
         }
 
-        // 特別獎
-        if (invoice.equals(period.specialPrize)) {
-            return InvoiceResult.SPECIAL_PRIZE;
+        final PrizeSnapshot current = refreshIfNeeded();
+        final InvoicePeriod period = current.periods().get(periodKey);
+        if (period == null) {
+            return current.lastRefreshSucceeded()
+                    ? InvoiceResult.ERROR_NOT_FOUND
+                    : InvoiceResult.ERROR_PRIZE_DATA_UNAVAILABLE;
         }
 
-        // 特獎
-        if (invoice.equals(period.grandPrize)) {
+        if (invoice.equals(period.specialPrize())) {
+            return InvoiceResult.SPECIAL_PRIZE;
+        }
+        if (invoice.equals(period.grandPrize())) {
             return InvoiceResult.GRAND_PRIZE;
         }
 
-        // 頭獎
-        for (String first : period.firstPrizes) {
+        for (String first : period.firstPrizes()) {
             if (invoice.equals(first)) {
                 return InvoiceResult.FIRST_PRIZE;
             }
         }
 
-        // 二～六獎
-        for (String first : period.firstPrizes) {
+        for (String first : period.firstPrizes()) {
             if (invoice.endsWith(first.substring(1))) {
                 return InvoiceResult.SECOND_PRIZE;
             }
@@ -91,25 +94,50 @@ public class InvoiceService {
             }
         }
 
+        if (period.additionalSixthPrizes().stream().anyMatch(invoice::endsWith)) {
+            return InvoiceResult.SIXTH_PRIZE;
+        }
         return InvoiceResult.NO_PRIZE;
     }
 
-    public static class InvoicePeriod {
+    private PrizeSnapshot refreshIfNeeded() {
+        final Instant now = clock.instant();
+        PrizeSnapshot current = snapshot;
+        if (now.isBefore(current.refreshAfter())) {
+            return current;
+        }
 
-        String period; // 期別
-        String specialPrize; // 特別獎
-        String grandPrize; // 特獎
-        List<String> firstPrizes; // 頭獎
-
-        public InvoicePeriod(
-                final String period,
-                final String specialPrize,
-                final String grandPrize,
-                final List<String> firstPrizes) {
-            this.period = period;
-            this.specialPrize = specialPrize;
-            this.grandPrize = grandPrize;
-            this.firstPrizes = firstPrizes;
+        synchronized (refreshMonitor) {
+            current = snapshot;
+            if (now.isBefore(current.refreshAfter())) {
+                return current;
+            }
+            try {
+                final List<InvoicePeriod> fetched = periodSource.fetchPeriods();
+                if (fetched.isEmpty()) {
+                    throw new IllegalStateException("Invoice prize source returned no periods");
+                }
+                final Map<String, InvoicePeriod> periods = new LinkedHashMap<>();
+                for (InvoicePeriod period : fetched) {
+                    if (periods.putIfAbsent(period.period(), period) != null) {
+                        throw new IllegalStateException("Duplicate invoice period: " + period.period());
+                    }
+                }
+                final Map<String, InvoicePeriod> immutablePeriods =
+                        Collections.unmodifiableMap(new LinkedHashMap<>(periods));
+                current = new PrizeSnapshot(immutablePeriods, now.plus(refreshInterval), true);
+                snapshot = current;
+                log.info("Loaded {} invoice prize periods from RSS", periods.size());
+            } catch (RuntimeException e) {
+                current = new PrizeSnapshot(current.periods(), now.plus(failureRetryInterval), false);
+                snapshot = current;
+                log.warn("Unable to refresh invoice prize RSS; keeping the last valid snapshot: {}", e.getMessage());
+                log.debug("Invoice prize RSS refresh failure", e);
+            }
+            return current;
         }
     }
+
+    private record PrizeSnapshot(
+            Map<String, InvoicePeriod> periods, Instant refreshAfter, boolean lastRefreshSucceeded) {}
 }

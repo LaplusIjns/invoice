@@ -19,7 +19,6 @@ import java.util.Base64;
 import java.util.Collections;
 import java.util.Date;
 import java.util.List;
-import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
@@ -152,7 +151,7 @@ public class ProcessService {
         return List.of();
     }
 
-    public @NonNull Set<@NonNull String> invoicePeriods() {
+    public @NonNull List<@NonNull String> invoicePeriods() {
         return invoiceService.invoicePeriods();
     }
 

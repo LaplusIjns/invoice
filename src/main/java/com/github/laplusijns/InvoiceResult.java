@@ -12,7 +12,8 @@ public enum InvoiceResult implements Serializable {
     FOURTH_PRIZE("四獎"),
     FIFTH_PRIZE("五獎"),
     SIXTH_PRIZE("六獎"),
-    ERROR_NOT_FOUND("未找到期別、過期"),
+    ERROR_NOT_FOUND("尚未開獎或期別不存在"),
+    ERROR_PRIZE_DATA_UNAVAILABLE("中獎資料暫時無法取得"),
     ERROR_EIGHT_NUMBER("號碼不對"),
     NO_PRIZE("未中獎"),
     PROGRESS("處理中");

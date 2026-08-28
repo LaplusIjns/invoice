@@ -36,11 +36,25 @@ const InvoiceForm = memo(function InvoiceForm({
   const invoicePeriods = useRef<Array<{ label: string; value: string }>>([]);
 
   useEffect(() => {
-    ProcessService.invoicePeriods().then((periods: string[]) => {
-      const formatted = periods.map((item) => ({ label: item, value: item }));
-      invoicePeriods.current = formatted;
-      setPeriod(formatted[0]?.value ?? '');
-    });
+    ProcessService.invoicePeriods()
+      .then((periods: string[]) => {
+        const formatted = periods.map((item) => ({ label: item, value: item }));
+        invoicePeriods.current = formatted;
+        setPeriod(formatted[0]?.value ?? '');
+        if (formatted.length === 0) {
+          Notification.show('中獎期別暫時無法取得，請稍後再試', {
+            theme: 'warning',
+            position: 'top-center',
+          });
+        }
+      })
+      .catch((error) => {
+        console.error(error);
+        Notification.show('中獎期別暫時無法取得，請稍後再試', {
+          theme: 'warning',
+          position: 'top-center',
+        });
+      });
   }, []);
 
   const handleSubmit = useCallback(() => {

@@ -33,6 +33,22 @@ The connection can be changed with environment variables:
 - `PADDLEX_CONNECT_TIMEOUT` (default: `2s`)
 - `PADDLEX_READ_TIMEOUT` (default: `60s`)
 
+## Winning invoice numbers
+
+Winning numbers are loaded from the Ministry of Finance's official RSS feed at
+`https://invoice.etax.nat.gov.tw/invoice.xml`; no AppID is required. A validated
+snapshot is cached in memory for six hours. If a refresh fails, known periods
+remain available, while an unknown period is reported as temporarily
+unavailable instead of being treated as a losing invoice.
+
+The connection can be changed with environment variables:
+
+- `INVOICE_PRIZES_RSS_URL`
+- `INVOICE_PRIZES_CONNECT_TIMEOUT` (default: `5s`)
+- `INVOICE_PRIZES_READ_TIMEOUT` (default: `15s`)
+- `INVOICE_PRIZES_REFRESH_INTERVAL` (default: `6h`)
+- `INVOICE_PRIZES_FAILURE_RETRY_INTERVAL` (default: `5m`)
+
 ## Deploying to Production
 
 To create a production build, call `mvnw clean package -Pproduction` (Windows),
