@@ -6,6 +6,7 @@ import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.net.URLConnection;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -54,6 +55,7 @@ public class ProcessService {
     InvoiceService invoiceService;
     ImageCache imageCache;
     InvoiceChannels invoiceChannels;
+    PaddleXOcrClient paddleXOcrClient;
     RetryTemplate retryTemplate;
     UserCache userCache;
     private final ExecutorService workerExecutor = Executors.newSingleThreadExecutor();
@@ -86,6 +88,11 @@ public class ProcessService {
 
     @NonNull
     public String jsessionId() {
+        return currentSessionId();
+    }
+
+    @NonNull
+    private String currentSessionId() {
         final VaadinServletRequest vaadinRequest = (VaadinServletRequest) VaadinService.getCurrentRequest();
         final HttpServletRequest request = vaadinRequest.getHttpServletRequest();
         final HttpSession vaadinSession = request.getSession();
@@ -102,13 +109,15 @@ public class ProcessService {
             final InvoiceService invoiceService,
             final ImageCache imageCache,
             final InvoiceChannels invoiceChannels,
-            final UserCache userCache) {
+            final UserCache userCache,
+            final PaddleXOcrClient paddleXOcrClient) {
         super();
         this.chatClient = chatClient;
         this.invoiceService = invoiceService;
         this.imageCache = imageCache;
         this.invoiceChannels = invoiceChannels;
         this.userCache = userCache;
+        this.paddleXOcrClient = paddleXOcrClient;
 
         final var retryPolicy = RetryPolicy.builder()
                 .includes(Exception.class)
@@ -160,20 +169,11 @@ public class ProcessService {
                 final String mimeTypeString = parts[0].replace("data:", "");
                 final byte[] imageBytes = Base64.getDecoder().decode(parts[1]);
                 final byte[] resizeBytes = resizePng(imageBytes, 300);
-                final Resource resource = new ByteArrayResource(imageBytes);
                 final MimeType mimeType = MimeTypeUtils.parseMimeType(mimeTypeString);
 
-                final UserMessage.Builder builder = UserMessage.builder().text(AI_PROMPT);
-                builder.media(new Media(mimeType, resource));
+                final Invoice invoice = recognizeInvoice(imageBytes, mimeType);
 
-                Invoice invoice =
-                        chatClient.prompt(new Prompt(builder.build())).call().entity(Invoice.class);
-                if (invoice == null) {
-                    invoice = new Invoice(NA, NA);
-                }
-
-                final InvoiceResult result = invoiceService.checkInvoice(
-                        invoice.invoiceDate, invoice.invoiceNumber.split("-")[1]);
+                final InvoiceResult result = checkInvoiceResult(invoice);
                 final String uuid = UUID.randomUUID().toString();
                 imageCache.put(uuid, imageBytes);
                 imageCache.putThumbnail(uuid, resizeBytes);
@@ -187,13 +187,120 @@ public class ProcessService {
                 log.info("emitResult {}", emitResult);
 
             } catch (Exception e) {
-                e.printStackTrace();
+                log.error("invoice OCR task failed", e);
             }
         });
 
         if (!bool) {
             log.error("序列出錯");
         }
+    }
+
+    public boolean reprocess(@NonNull final String key) {
+        final String jsessionId = currentSessionId();
+        final UserData userData = userCache.get(jsessionId);
+        if (userData == null) {
+            return false;
+        }
+
+        final List<InvoiceDTO> data = userData.getData();
+        InvoiceDTO existingInvoice = null;
+        synchronized (data) {
+            for (final InvoiceDTO invoice : data) {
+                if (invoice.key().equals(key)) {
+                    existingInvoice = invoice;
+                    break;
+                }
+            }
+        }
+        if (existingInvoice == null) {
+            return false;
+        }
+
+        final byte[] imageBytes = imageCache.get(existingInvoice.imageUrl());
+        if (imageBytes == null) {
+            return false;
+        }
+
+        final MimeType mimeType = detectMimeType(imageBytes);
+        return taskQueue.offer(() -> reprocessInvoice(key, jsessionId, imageBytes, mimeType));
+    }
+
+    private void reprocessInvoice(
+            final String key, final String jsessionId, final byte[] imageBytes, final MimeType mimeType) {
+        try {
+            final Invoice invoice = recognizeInvoice(imageBytes, mimeType);
+            final InvoiceResult result = checkInvoiceResult(invoice);
+            final UserData userData = userCache.get(jsessionId);
+            if (userData == null) {
+                return;
+            }
+
+            final List<InvoiceDTO> data = userData.getData();
+            InvoiceDTO updatedInvoice = null;
+            synchronized (data) {
+                for (int index = 0; index < data.size(); index++) {
+                    final InvoiceDTO existingInvoice = data.get(index);
+                    if (existingInvoice.key().equals(key)) {
+                        updatedInvoice = new InvoiceDTO(
+                                existingInvoice.key(),
+                                invoice.invoiceNumber,
+                                invoice.invoiceDate,
+                                result,
+                                existingInvoice.imageUrl());
+                        data.set(index, updatedInvoice);
+                        break;
+                    }
+                }
+            }
+            if (updatedInvoice == null) {
+                return;
+            }
+
+            final EmitResult emitResult = invoiceChannels.tryEmitNext(jsessionId, updatedInvoice);
+            log.info("invoice {} reprocessed; emitResult {}", key, emitResult);
+        } catch (Exception e) {
+            log.error("invoice {} reprocessing failed", key, e);
+        }
+    }
+
+    private InvoiceResult checkInvoiceResult(final Invoice invoice) {
+        final int separatorIndex = invoice.invoiceNumber.indexOf('-');
+        final String invoiceDigits =
+                separatorIndex >= 0 ? invoice.invoiceNumber.substring(separatorIndex + 1) : "";
+        return invoiceService.checkInvoice(invoice.invoiceDate, invoiceDigits);
+    }
+
+    private MimeType detectMimeType(final byte[] imageBytes) {
+        try (var input = new ByteArrayInputStream(imageBytes)) {
+            final String detectedMimeType = URLConnection.guessContentTypeFromStream(input);
+            if (detectedMimeType != null) {
+                return MimeTypeUtils.parseMimeType(detectedMimeType);
+            }
+        } catch (IOException e) {
+            log.warn("unable to detect cached invoice image type", e);
+        }
+        return MimeTypeUtils.parseMimeType("image/png");
+    }
+
+    private Invoice recognizeInvoice(final byte[] imageBytes, final MimeType mimeType) {
+        try {
+            final var paddleXResult = paddleXOcrClient.recognize(imageBytes);
+            if (paddleXResult.isPresent()) {
+                final var result = paddleXResult.get();
+                log.info("invoice OCR completed with PaddleX");
+                return new Invoice(result.invoiceNumber(), result.invoiceDate());
+            }
+            log.warn("PaddleX OCR did not find both the invoice number and date; using AI fallback");
+        } catch (Exception e) {
+            log.warn("PaddleX OCR unavailable; using AI fallback: {}", e.getMessage());
+        }
+
+        final Resource resource = new ByteArrayResource(imageBytes);
+        final UserMessage.Builder builder = UserMessage.builder().text(AI_PROMPT);
+        builder.media(new Media(mimeType, resource));
+        final Invoice invoice = chatClient.prompt(new Prompt(builder.build())).call().entity(Invoice.class);
+        return invoice == null ? new Invoice(NA, NA) : invoice;
     }
 
     public void deleteInvoice(final String key) {

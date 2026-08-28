@@ -12,6 +12,27 @@ http://localhost:8080 in your browser.
 You can also import the project to your IDE of choice as you would with any
 Maven project.
 
+## Invoice OCR
+
+Invoice images are sent to PaddleX first. Start a PaddleX general OCR serving
+pipeline on port `16601`:
+
+```shell
+paddlex --install serving
+paddlex --serve --pipeline OCR --host 127.0.0.1 --port 16601
+```
+
+The application calls `POST http://127.0.0.1:16601/ocr`. If the service is
+unavailable, times out, or does not return both a valid invoice number and
+date, the existing multimodal AI OCR is used as a fallback.
+
+The connection can be changed with environment variables:
+
+- `PADDLEX_BASE_URL` (default: `http://127.0.0.1:16601`)
+- `PADDLEX_ENDPOINT` (default: `/ocr`)
+- `PADDLEX_CONNECT_TIMEOUT` (default: `2s`)
+- `PADDLEX_READ_TIMEOUT` (default: `60s`)
+
 ## Deploying to Production
 
 To create a production build, call `mvnw clean package -Pproduction` (Windows),
