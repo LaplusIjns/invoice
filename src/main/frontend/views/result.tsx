@@ -11,7 +11,7 @@ import {
   FormRow,
   TextFieldElement,
 } from '@vaadin/react-components';
-import { useState, useEffect, useRef, useCallback, memo } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, memo } from 'react';
 import { ProcessService } from 'Frontend/generated/endpoints';
 import InvoiceDTO from 'Frontend/generated/com/github/laplusijns/InvoiceDTO';
 import { useSignal } from '@vaadin/hilla-react-signals';
@@ -19,6 +19,11 @@ import {
   getInvoiceVerificationStatus,
   type InvoiceVerificationStatus,
 } from 'Frontend/invoice-verification';
+import {
+  filterInvoices,
+  getInvoicePeriods,
+  type InvoiceWinningFilter,
+} from 'Frontend/invoice-filters';
 import './result.css';
 
 type InvoiceProcessingStatus = '排隊中' | '辨識中' | '失敗' | '待確認';
@@ -136,10 +141,31 @@ const InvoiceForm = memo(function InvoiceForm({
 
 export default function ResultView() {
   const [invoices, setInvoices] = useState<InvoiceDTO[]>([]);
+  const [invoiceNumberFilter, setInvoiceNumberFilter] = useState('');
+  const [periodFilter, setPeriodFilter] = useState('');
+  const [winningFilter, setWinningFilter] = useState<InvoiceWinningFilter>('all');
   const [selectedPreview, setSelectedPreview] = useState<string | null>(null);
   const [reprocessingKeys, setReprocessingKeys] = useState<Set<string>>(() => new Set());
   const jsessionidRef = useRef<string>('');
   const subscriptionRef = useRef<any>(null);
+
+  const periodFilterItems = useMemo(
+    () => [
+      { label: '全部期別', value: '' },
+      ...getInvoicePeriods(invoices).map((period) => ({ label: period, value: period })),
+    ],
+    [invoices],
+  );
+  const filteredInvoices = useMemo(
+    () =>
+      filterInvoices(invoices, {
+        invoiceNumber: invoiceNumberFilter,
+        period: periodFilter,
+        winningStatus: winningFilter,
+      }),
+    [invoices, invoiceNumberFilter, periodFilter, winningFilter],
+  );
+  const hasActiveFilters = Boolean(invoiceNumberFilter || periodFilter || winningFilter !== 'all');
 
   useEffect(() => {
     ProcessService.jsessionId().then((jsessionid: string) => {
@@ -300,7 +326,45 @@ export default function ResultView() {
     <div className="flex flex-col h-full items-center justify-center text-center box-border w-full">
       <InvoiceForm onSubmit={handleSubmit} />
       <h2 className="mb-m">發票結果列表</h2>
-      <Grid items={invoices} className="w-full" theme="row-stripes wrap-cell-content compact">
+      <div className="invoice-filters" role="search" aria-label="發票列表篩選">
+        <TextField
+          label="發票號碼"
+          placeholder="輸入部分號碼"
+          value={invoiceNumberFilter}
+          clearButtonVisible
+          onValueChanged={(event) => setInvoiceNumberFilter(event.detail.value)}
+        />
+        <Select
+          label="期別"
+          items={periodFilterItems}
+          value={periodFilter}
+          onValueChanged={(event) => setPeriodFilter(event.detail.value)}
+        />
+        <Select
+          label="中獎狀態"
+          items={[
+            { label: '全部狀態', value: 'all' },
+            { label: '中獎', value: 'won' },
+            { label: '未中獎', value: 'not-won' },
+            { label: '尚未判定', value: 'undetermined' },
+          ]}
+          value={winningFilter}
+          onValueChanged={(event) => setWinningFilter(event.detail.value as InvoiceWinningFilter)}
+        />
+        <Button
+          disabled={!hasActiveFilters}
+          onClick={() => {
+            setInvoiceNumberFilter('');
+            setPeriodFilter('');
+            setWinningFilter('all');
+          }}>
+          清除篩選
+        </Button>
+      </div>
+      <div className="invoice-filter-summary" role="status" aria-live="polite">
+        顯示 {filteredInvoices.length} 筆，共 {invoices.length} 筆
+      </div>
+      <Grid items={filteredInvoices} className="w-full" theme="row-stripes wrap-cell-content compact">
         <GridColumn header="操作" renderer={ActionRenderer} autoWidth flexGrow={0} />
         <GridColumn header="圖片" path="imageUrl" renderer={ImageRenderer} flexGrow={0} autoWidth />
         <GridColumn header="狀態" renderer={ProcessingStatusRenderer} autoWidth flexGrow={0} />

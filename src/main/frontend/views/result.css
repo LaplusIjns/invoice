@@ -11,6 +11,30 @@
   white-space: nowrap;
 }
 
+.invoice-filters {
+  display: grid;
+  grid-template-columns: minmax(12rem, 2fr) repeat(2, minmax(10rem, 1fr)) auto;
+  align-items: end;
+  gap: var(--lumo-space-m);
+  width: 100%;
+  margin-bottom: var(--lumo-space-xs);
+  text-align: left;
+}
+
+.invoice-filter-summary {
+  align-self: flex-start;
+  margin-bottom: var(--lumo-space-s);
+  color: var(--lumo-secondary-text-color);
+  font-size: var(--lumo-font-size-s);
+}
+
+@media (max-width: 50rem) {
+  .invoice-filters {
+    grid-template-columns: 1fr;
+    gap: var(--lumo-space-xs);
+  }
+}
+
 .invoice-status--queued {
   background: var(--lumo-contrast-10pct);
   color: var(--lumo-secondary-text-color);
