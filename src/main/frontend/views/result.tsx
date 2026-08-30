@@ -9,6 +9,7 @@ import {
   Select,
   FormLayout,
   FormRow,
+  Icon,
   TextFieldElement,
 } from '@vaadin/react-components';
 import { useState, useEffect, useRef, useCallback, useMemo, memo } from 'react';
@@ -376,12 +377,25 @@ export default function ResultView() {
       </Grid>
       {selectedPreview && (
         <Dialog
-          headerTitle="發票圖"
+          headerTitle="發票圖片預覽"
+          header={
+            <Button
+              theme="tertiary-inline icon"
+              aria-label="關閉圖片預覽"
+              title="關閉"
+              onClick={() => setSelectedPreview(null)}>
+              <Icon src="line-awesome/svg/times-solid.svg" aria-hidden="true" />
+            </Button>
+          }
           opened={true}
           onOpenedChanged={(event: any) => {
             if (!event.detail.value) setSelectedPreview(null);
           }}>
-          <img src={'blob/' + selectedPreview} style={{ width: '100%', height: 'auto', borderRadius: 8 }} />
+          <img
+            src={'blob/' + selectedPreview}
+            alt="發票圖片預覽"
+            style={{ width: '100%', height: 'auto', borderRadius: 8 }}
+          />
         </Dialog>
       )}
     </div>
